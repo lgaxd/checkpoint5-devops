@@ -1,94 +1,128 @@
 # Roteiro de gravação — DimDim no Azure
 
-Roteiro pronto para gravar a demonstração do checkpoint. Duração prevista: **8 a 10 minutos de apresentação**, além do tempo variável de provisionamento e inicialização Azure. Grave em 720p ou superior, com áudio claro. A interface pode estar em português e os nomes dos recursos devem corresponder ao `.env`.
+Este roteiro segue os requisitos do checkpoint: mostrar o tutorial de implantação completo, com criação dos recursos em nuvem, o deploy acontecendo, a aplicação Web funcionando, CRUD nas duas tabelas com verificação no Azure SQL após cada operação e o monitoramento no Application Insights e no banco. Reserve **15 a 25 minutos**, além de qualquer demora excepcional da Azure. Grave em **720p ou superior**, com explicação falada.
 
-> **Importante:** os recursos Azure foram removidos após a validação. Para uma demonstração ao vivo, reprovisione antes de gravar e faça o teardown somente depois de guardar o vídeo e as evidências. Não mostre o `.env`, senhas, tokens JWT, valores de connection string nem comandos que revelem segredos. Não use `set -x`.
+> **Segurança:** não mostre `.env`, senhas, tokens JWT, connection strings ou dados pessoais reais. O script de deploy também imprime o ID da subscription e o IPv4 usado na regra temporária do SQL; oculte esses trechos na captura ou desfoque-os na edição, sem cortar a execução do deploy. Não use `set -x`.
 
-## Antes de apertar Gravar
+## Preparação antes da gravação
 
-1. Confira no `.env` a região autorizada **Chile Central (`chilecentral`)**, nomes de recursos, `CLIENT_IP` público atual e credenciais, sem compartilhar o arquivo.
-2. No WSL, entre na pasta do projeto, confirme a subscription Azure e as ferramentas. Se necessário, ative o caminho do `sqlcmd`:
+Faça os preparativos fora da gravação para evitar pausas, mas **não faça o deploy antes**: a gravação precisa mostrar a execução real do script.
+
+1. Confirme que a subscription e a região autorizada estão selecionadas. Este projeto está configurado para `chilecentral`; confira disponibilidade e quota na subscription antes do vídeo. Não exiba o `.env`.
+2. Confira o `CLIENT_IP` público atual, os nomes dos recursos e as credenciais no `.env`, sem imprimir nem compartilhar seus valores. O nome do Web App deve estar disponível globalmente.
+3. No WSL ou Git Bash, abra a raiz do projeto e confira as ferramentas e a subscription ativa:
 
    ```bash
    cd /mnt/c/Users/LGA/Documents/checkpoint5-devops/cp4-devops
    export PATH="$PATH:/opt/mssql-tools18/bin"
-   az account show --output table
+   az account show --query name --output tsv
    java -version
    command -v az sqlcmd curl zip
    ```
 
-3. Confirme que está selecionada a subscription correta. O `.env` deve estar salvo e acessível ao WSL.
-4. Rode os testes antes da gravação, para não consumir tempo de vídeo com falhas:
+   Se `sqlcmd` não estiver em `/opt/mssql-tools18/bin`, ajuste o `PATH` conforme a instalação local.
+4. Teste a conectividade com o banco e prepare uma conta fictícia para autenticar na interface. Use uma senha temporária exclusiva para o vídeo, não reutilizada em nenhum outro lugar.
+5. Deixe abertos, mas fora da captura até o momento certo:
+   - VS Code na raiz do projeto e no `README.md`;
+   - terminal no WSL/Git Bash, na raiz do projeto;
+   - portal Azure com acesso ao Resource Group `561413-dimdim-rg`;
+   - navegador pronto para a URL do Web App;
+   - Azure SQL Query Editor ou o terminal preparado para `sqlcmd`.
+6. Use registros de demonstração consistentes durante o vídeo. Exemplo: usuário `Ana Silva`, e-mail fictício `ana-demo-20261006@example.com`, e fazenda `Fazenda Horizonte`. Se repetir a gravação, escolha outro e-mail ainda não usado.
 
-   ```bash
-   ./mvnw --batch-mode clean test
-   ```
+### Preparar a consulta SQL sem expor a senha
 
-   A última validação executada passou com **3 testes, zero falhas**. Se quiser mostrar essa etapa, mantenha a janela de terminal aberta no resumo do Maven, sem imprimir nem exportar segredos.
-5. Prepare no navegador as páginas do portal Azure, mas não deixe visível nenhum segredo:
-   - Resource Group: `561413-dimdim-rg`
-   - App Service: `561413-dimdim-webapp`
-   - Azure SQL Database: `db-dimdim`
-   - Application Insights: `561413-dimdim-insights`
-   - Região: Chile Central
-6. Planeje iniciar o provisionamento pouco antes de gravar. O deploy pode demorar vários minutos; a duração depende do Azure. Se a gravação não puder incluir a espera, mostre o terminal com o deploy já concluído e explique que esse foi o comando usado.
-
-## Linha do tempo e fala sugerida
-
-| Minutagem | O que mostrar | Fala sugerida |
-|---|---|---|
-| **00:00–00:35** | Abra o navegador na página inicial do projeto ou no README. Mostre o nome DimDim e a arquitetura/resumo, sem exibir o `.env`. | “Este é o DimDim, uma aplicação Java 21 para cadastro de usuários e fazendas. A aplicação roda no Azure App Service, persiste os dados no Azure SQL e envia telemetria ao Application Insights.” |
-| **00:35–01:10** | Mostre brevemente a estrutura do projeto no VS Code: `src/main/java/br/com/fiap/dimdim`, `scripts/`, `docs/architecture.md` e exemplos em `docs/api/`. Não abra arquivos de configuração que contenham valores sensíveis. | “O código está organizado em camadas: controllers, services, repositories e entidades. Também estão incluídos o DDL, os scripts Azure, os testes e os exemplos da API. A solução não usa Docker, ACI, ACR nem GitHub Actions.” |
-| **01:10–01:40** | Mostre o resumo dos testes Maven já executados, ou rode `./mvnw --batch-mode clean test` se o tempo permitir. | “Antes da publicação, os testes de integração verificam autenticação, validação, CRUD e o relacionamento entre usuário e fazenda. Os testes usam H2; a execução Azure usa Azure SQL.” |
-| **01:40–02:10** | No WSL, mostre apenas a subscription ativa e a região configurada, sem abrir `.env`. Inicie `bash scripts/azure-deploy.sh`. | “O deploy é feito pela Azure CLI. O script cria ou reutiliza os recursos previstos, inicializa as duas tabelas e o usuário SQL restrito, configura os App Settings e publica o JAR com `az webapp deploy`.” |
-| **02:10–02:35** | Mostre a saída do deploy quando indicar publicação concluída e health check aprovado. Não mostre valores de credenciais, tokens ou connection strings. | “O pacote inclui o Java Agent do Application Insights. O health check final valida que a aplicação está saudável e que consegue acessar o datasource SQL.” |
-| **02:35–03:05** | No portal Azure, mostre o Resource Group e sua lista de recursos; em seguida abra o App Service e mostre status Running e região. | “Aqui estão os recursos do projeto na região permitida pela subscription: o App Service Linux com Java 21, a base Azure SQL e o Application Insights.” |
-| **03:05–03:35** | Abra `https://561413-dimdim-webapp.azurewebsites.net/`. Mostre a tela inicial e depois `https://561413-dimdim-webapp.azurewebsites.net/actuator/health`, com status `UP`. | “A interface web e a API são servidas pelo mesmo App Service. O health check retorna UP e confirma a prontidão da aplicação e do banco.” |
-| **03:35–04:10** | Na interface, escolha **Criar conta**. Use dados fictícios (por exemplo, nome “Responsável Demo”, e-mail único `responsavel-demo-<sufixo>@example.com` e uma senha temporária que não seja reutilizada). Mostre a sessão iniciada e a lista de usuários. | “O cadastro cria a conta e inicia uma sessão autenticada. As senhas são armazenadas com BCrypt; os endpoints de dados exigem token JWT.” |
-| **04:10–05:00** | No formulário Usuários, crie “Ana Silva” com e-mail fictício único e senha temporária. Mostre READ na lista; clique **Editar**, altere o nome para “Ana Souza” e salve. | “Agora demonstro CREATE, READ e UPDATE de usuário pela interface. A API também oferece busca por ID e valida os dados de entrada.” |
-| **05:00–05:50** | No formulário Fazendas, selecione Ana Souza como responsável e crie “Fazenda Horizonte”, cidade “Ribeirao Preto”, estado “SP”, área `120.50`. Mostre a fazenda na lista; clique **Editar**, mude o nome para “Fazenda Horizonte II” e a área para `135.00`; salve. | “A fazenda é vinculada a um usuário existente por chave estrangeira. Também demonstro CREATE, READ e UPDATE e a validação dos campos da fazenda.” |
-| **05:50–06:35** | Abra Azure SQL Query Editor/cliente SQL e consulte as duas tabelas. Se usar WSL, execute a consulta abaixo; ela pede a senha sem passá-la como argumento visível. | “Os registros aparecem nas tabelas do Azure SQL, demonstrando persistência real fora do processo da aplicação e o relacionamento entre usuário e fazenda.” |
-| **06:35–07:20** | Abra Application Insights. Mostre **Transaction search** ou **Logs** com requests e dependências. Se estiver vazio, gere uma atualização na interface e aguarde alguns minutos, depois atualize a consulta. | “O Java Agent envia telemetria para o Application Insights. Aqui estão as requisições e dependências observadas durante o uso da aplicação.” |
-| **07:20–08:05** | Volte à interface. Exclua primeiro a Fazenda Horizonte II e depois o usuário Ana Souza. Mostre as mensagens de sucesso e a atualização das listas. | “Demonstro DELETE nas duas entidades. A fazenda é excluída antes do usuário; a chave estrangeira também protege a integridade da relação.” |
-| **08:05–08:35** | Mostre rapidamente README, arquitetura e o documento de entrega sem conteúdo privado. | “A entrega inclui instruções de execução, arquitetura, DDL, scripts, exemplos JSON, testes e o roteiro para reproduzir o deploy.” |
-| **08:35–09:00** | Encerre com a página inicial da aplicação e/ou o Resource Group ainda ativo. | “Esta foi a demonstração do DimDim com Java 21, Azure App Service, Azure SQL PaaS e Application Insights. Após salvar as evidências, os recursos serão removidos para evitar custos contínuos.” |
-
-## Comandos para as partes ao vivo
-
-### Provisionamento e deploy
-
-Execute na raiz do projeto, no WSL:
-
-```bash
-cd /mnt/c/Users/LGA/Documents/checkpoint5-devops/cp4-devops
-export PATH="$PATH:/opt/mssql-tools18/bin"
-bash scripts/azure-deploy.sh
-```
-
-O script roda os testes, inicializa o Azure SQL, publica o artefato usando `az webapp deploy` e repete o health check até a aplicação responder.
-
-### Consulta de persistência no Azure SQL
-
-Carregue as variáveis sem imprimi-las. `SQLCMDPASSWORD` evita colocar a senha administrativa na linha de comando e no histórico:
+No terminal da gravação, carregue as variáveis e defina este atalho antes de começar o CRUD. O `source` não imprime o conteúdo do `.env`; `SQLCMDPASSWORD` evita passar a senha como argumento visível do `sqlcmd`. Não habilite o modo de rastreamento do shell.
 
 ```bash
 set -a
 source .env
 set +a
-export PATH="$PATH:/opt/mssql-tools18/bin"
-SQLCMDPASSWORD="$SQL_ADMIN_PASSWORD" sqlcmd \
-  -S "tcp:${SQL_SERVER_NAME}.database.windows.net,1433" \
-  -d "$SQL_DATABASE_NAME" \
-  -U "$SQL_ADMIN_USERNAME" \
-  -N \
-  -Q "SELECT ID_USUARIO, NM_USUARIO, DS_EMAIL FROM dbo.TB_USUARIO; SELECT ID_FAZENDA, ID_USUARIO, NM_FAZENDA, DS_CIDADE, DS_ESTADO, NR_AREA_HECTARES FROM dbo.TB_FAZENDA;"
+
+sqlcheck() {
+  SQLCMDPASSWORD="$SQL_ADMIN_PASSWORD" sqlcmd \
+    -S "tcp:${SQL_SERVER_NAME}.database.windows.net,1433" \
+    -d "$SQL_DATABASE_NAME" \
+    -U "$SQL_ADMIN_USERNAME" \
+    -N \
+    -Q "$1"
+}
 ```
 
-Faça essa consulta **depois de criar/editar** os registros e antes de excluí-los. Mostre somente os dados fictícios inseridos para a gravação.
+Confirme antes de gravar que `sqlcheck "SELECT TOP 1 ID_USUARIO FROM dbo.TB_USUARIO;"` conecta sem erro. Para cada operação do CRUD, execute a consulta correspondente abaixo e deixe o resultado legível na gravação.
 
-### Exemplo de consulta no Application Insights Logs
+## Sequência de gravação e fala sugerida
 
-No recurso `561413-dimdim-insights`, abra **Logs** e consulte as requests recentes:
+| Tempo aproximado | O que mostrar | Fala sugerida |
+|---|---|---|
+| **00:00–00:45** | Apresente o projeto e a tela inicial da aplicação. | “Este é o DimDim, uma aplicação Web em Java 21 para gerenciar usuários e fazendas. Ela será publicada no Azure App Service, usará Azure SQL como banco PaaS relacional e Application Insights para telemetria.” |
+| **00:45–01:30** | Mostre brevemente o README, a arquitetura e as pastas `src/`, `scripts/` e `docs/`. Não abra o `.env`. | “A solução inclui interface Web, API, duas tabelas relacionadas, DDL, scripts de implantação e testes. O deploy será feito pela Azure CLI com `az webapp deploy`; o banco é Azure SQL, não containerizado.” |
+| **01:30–07:30** | Comece a captura do terminal e execute `bash scripts/azure-deploy.sh`. Mantenha visíveis o início, as etapas de criação ou reutilização dos recursos, os testes Maven, o envio do pacote e o resultado final do health check. A duração varia conforme a Azure; pode acelerar somente os períodos de espera na edição, mantendo evidentes o comando executado e os resultados. | “Agora estou executando o tutorial de implantação do repositório. O script cria ou reutiliza o Resource Group, o Azure SQL Server e database, o App Service Linux com Java 21 e o Application Insights. Em seguida inicializa o schema e o usuário restrito do banco, executa os testes e empacota a aplicação.” |
+| **07:30–08:15** | Mostre o trecho `az webapp deploy` sendo executado e depois a mensagem `Deploy e smoke test concluídos`. Oculte na edição o ID da subscription e o IPv4, se aparecerem. | “O pacote está sendo enviado ao App Service com `az webapp deploy`. O smoke test confirma que o endpoint de health responde e que a aplicação consegue acessar o banco.” |
+| **08:15–09:00** | No portal Azure, mostre o Resource Group com App Service Plan, Web App, SQL Server/database e Application Insights; abra o Web App para mostrar status e região. | “Estes são os recursos criados para a solução. O Web App está executando Java 21, e o SQL é um serviço Azure PaaS separado, na região configurada para o projeto.” |
+| **09:00–09:45** | Abra a URL `https://561413-dimdim-webapp.azurewebsites.net/` e `/actuator/health`. Registre a conta fictícia para entrar na interface; se mostrar o cadastro, consulte também o usuário recém-criado no SQL. | “A interface Web está hospedada na nuvem e não em localhost. O health check retorna `UP`; agora vou autenticar com dados fictícios para demonstrar as operações e a persistência.” |
+| **09:45–12:15** | Faça CREATE, READ, UPDATE e DELETE de um usuário pela interface. **Depois de cada ação**, mude para o terminal, rode a consulta SQL correspondente e mostre o resultado. Para READ, abra a listagem e confirme o mesmo registro no banco. | “Em cada etapa, além do resultado da interface, verifico diretamente a tabela `TB_USUARIO` no Azure SQL: o registro criado, o registro lido, os valores atualizados e a ausência da linha após a exclusão.” |
+| **12:15–15:00** | Faça CREATE, READ, UPDATE e DELETE de uma fazenda, associando-a a um usuário existente. **Depois de cada ação**, rode a consulta SQL correspondente. Nas consultas, mostre também o usuário associado à fazenda. | “Agora faço o mesmo CRUD na tabela `TB_FAZENDA`. A consulta relaciona fazenda e usuário pela chave estrangeira; depois da exclusão confirmo que o registro saiu do banco.” |
+| **15:00–17:00** | No Application Insights, mostre requests e dependências gerados durante o deploy e o CRUD. Depois, no recurso Azure SQL Database, abra as métricas ou a tela de monitoramento disponíveis para o banco. Se os gráficos ainda estiverem vazios, atualize a página após gerar requests e consultas. | “O Application Insights recebeu telemetria da aplicação, incluindo requisições e dependências. Aqui também estou mostrando o monitoramento do Azure SQL Database, conforme exigido no checkpoint.” |
+| **17:00–17:30** | Volte à aplicação ou ao Resource Group e encerre. | “A demonstração cobriu a implantação, a aplicação Web, o CRUD com confirmação de cada operação no Azure SQL e o monitoramento do App e do banco. Depois de guardar as evidências, vou remover os recursos para evitar custos.” |
+
+Os horários são uma referência. Não elimine etapas para caber em um tempo fixo; o requisito do checkpoint é que as evidências estejam no vídeo.
+
+## Conferência no Azure SQL após cada operação
+
+Execute uma consulta logo depois de **cada** ação na interface. Substitua o e-mail pelo valor exato usado na gravação e mantenha o filtro igual nas consultas de usuário.
+
+### Usuário — `dbo.TB_USUARIO`
+
+Após **CREATE**, confirme a nova linha:
+
+```bash
+sqlcheck "SELECT ID_USUARIO, NM_USUARIO, DS_EMAIL FROM dbo.TB_USUARIO WHERE DS_EMAIL = 'ana-demo-20261006@example.com';"
+```
+
+Após **READ**, mostre a listagem do usuário na interface e rode a mesma consulta para evidenciar que o registro lido está persistido no Azure SQL.
+
+Após **UPDATE**, confirme os valores atualizados (por exemplo, nome `Ana Souza`):
+
+```bash
+sqlcheck "SELECT ID_USUARIO, NM_USUARIO, DS_EMAIL FROM dbo.TB_USUARIO WHERE DS_EMAIL = 'ana-demo-20261006@example.com';"
+```
+
+Após **DELETE**, confirme que a consulta não retorna linhas:
+
+```bash
+sqlcheck "SELECT ID_USUARIO, NM_USUARIO, DS_EMAIL FROM dbo.TB_USUARIO WHERE DS_EMAIL = 'ana-demo-20261006@example.com';"
+```
+
+### Fazenda — `dbo.TB_FAZENDA`
+
+Crie a fazenda associada ao usuário escolhido na interface. Use o nome `Fazenda Horizonte` também no filtro abaixo.
+
+Após **CREATE**, confirme a fazenda e a relação com seu usuário:
+
+```bash
+sqlcheck "SELECT f.ID_FAZENDA, f.NM_FAZENDA, f.DS_CIDADE, f.DS_ESTADO, f.NR_AREA_HECTARES, u.ID_USUARIO, u.NM_USUARIO FROM dbo.TB_FAZENDA f JOIN dbo.TB_USUARIO u ON u.ID_USUARIO = f.ID_USUARIO WHERE f.NM_FAZENDA = 'Fazenda Horizonte';"
+```
+
+Após **READ**, mostre a fazenda na interface e rode a mesma consulta para confirmar que o registro lido está persistido e ligado ao usuário correto.
+
+Após **UPDATE**, use o nome efetivamente salvo (por exemplo, `Fazenda Horizonte II`) para confirmar os novos valores e a associação:
+
+```bash
+sqlcheck "SELECT f.ID_FAZENDA, f.NM_FAZENDA, f.DS_CIDADE, f.DS_ESTADO, f.NR_AREA_HECTARES, u.ID_USUARIO, u.NM_USUARIO FROM dbo.TB_FAZENDA f JOIN dbo.TB_USUARIO u ON u.ID_USUARIO = f.ID_USUARIO WHERE f.NM_FAZENDA = 'Fazenda Horizonte II';"
+```
+
+Após **DELETE**, confirme a ausência da fazenda:
+
+```bash
+sqlcheck "SELECT ID_FAZENDA, ID_USUARIO, NM_FAZENDA FROM dbo.TB_FAZENDA WHERE NM_FAZENDA = 'Fazenda Horizonte II';"
+```
+
+Exclua primeiro a fazenda e só depois o usuário associado, para respeitar a relação entre as tabelas. Se a gravação incluir a exclusão desse usuário, confirme também a ausência dele em `TB_USUARIO`.
+
+## Mostrar o monitoramento
+
+No Application Insights `561413-dimdim-insights`, abra **Transaction search** ou **Logs** depois de acessar a interface e executar as operações. Para logs, use:
 
 ```kusto
 requests
@@ -97,7 +131,7 @@ requests
 | order by timestamp desc
 ```
 
-Para mostrar dependências, incluindo chamadas ao SQL:
+Para dependências, incluindo chamadas originadas pela aplicação:
 
 ```kusto
 dependencies
@@ -106,31 +140,30 @@ dependencies
 | order by timestamp desc
 ```
 
-A telemetria pode levar alguns minutos para chegar. Gere chamadas na aplicação enquanto espera.
+A ingestão pode levar alguns minutos. Se ainda não houver dados, gere acessos na aplicação, espere e atualize a consulta. Em seguida, abra o recurso **Azure SQL Database** no portal e mostre a área **Monitoring/Métricas** e as métricas disponíveis para o banco. Explique o que aparece na tela; não afirme que uma métrica ou gráfico está preenchido se não estiver.
 
-## Checklist imediatamente antes da gravação
+## Checklist antes de encerrar
 
-- [ ] O deploy terminou com `Deploy e smoke test concluídos`.
-- [ ] `/actuator/health` retorna `UP`.
-- [ ] A interface abre e aceita registro/login.
-- [ ] Os dados de demonstração são fictícios e não incluem informações pessoais reais.
-- [ ] A consulta SQL confirma usuários e fazendas relacionados.
-- [ ] Requests/dependências do Application Insights já estão visíveis, ou há tempo para aguardar a ingestão.
-- [ ] O `.env`, senhas, JWT e connection strings não aparecem na captura.
-- [ ] O vídeo está gravando com áudio e resolução legíveis.
-- [ ] O teardown ficará para depois de salvar e revisar o vídeo.
+- [ ] O vídeo tem pelo menos 720p e explicação falada.
+- [ ] A gravação mostra a execução do How To e o comando real `bash scripts/azure-deploy.sh`.
+- [ ] É possível ver a criação ou reutilização dos recursos, os testes/build e o envio por `az webapp deploy`, além do smoke test final.
+- [ ] A interface Web hospedada no Azure está funcionando; não é uma demonstração somente em localhost ou somente de API.
+- [ ] CREATE, READ, UPDATE e DELETE foram mostrados para **cada** tabela, com consulta ao Azure SQL após cada operação.
+- [ ] O relacionamento entre usuário e fazenda está visível no banco.
+- [ ] O vídeo mostra Application Insights com telemetria e o monitoramento do Azure SQL Database.
+- [ ] `.env`, senha, token, connection string, ID da subscription, IPv4 público e dados pessoais não ficam expostos.
+- [ ] O vídeo foi revisado, salvo e publicado; o link está disponível para o PDF de entrega.
 
 ## Depois de gravar
 
-1. Revise o vídeo para confirmar que não aparecem `.env`, credenciais, tokens, connection strings ou informações pessoais.
-2. Salve e publique o vídeo; copie o link.
-3. Preencha nome do grupo, link do repositório e link do vídeo em [`entrega.md`](entrega.md).
-4. Confirme que o código publicado não inclui `.env`.
-5. Remova os recursos para evitar cobranças:
+1. Revise o vídeo e corte ou desfoque qualquer valor sensível que tenha aparecido, em especial o ID da subscription ou IPv4 impresso pelo deploy.
+2. Salve/publique o vídeo e preencha o link em [`entrega.md`](entrega.md), junto com os dados do repositório.
+3. Guarde o vídeo e as evidências antes de excluir qualquer recurso.
+4. Remova os recursos após salvar e revisar as evidências, para evitar cobranças:
 
    ```bash
    cd /mnt/c/Users/LGA/Documents/checkpoint5-devops/cp4-devops
    bash scripts/azure-teardown.sh
    ```
 
-   Digite exatamente o nome do Resource Group solicitado pelo script. A exclusão remove os recursos e os dados Azure; faça-a somente depois de salvar as evidências.
+   Confirme no prompt o nome exato do Resource Group. O teardown remove os recursos e os dados Azure; não o execute antes de concluir a gravação e guardar as evidências.
