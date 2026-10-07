@@ -37,3 +37,7 @@ build/
 ### VS Code ###
 .vscode/
 .env
+
+### Deploy scripts ###
+logs/
+.cache/

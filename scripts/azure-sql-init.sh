@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=lib-common.sh
+source "$SCRIPT_DIR/lib-common.sh"
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -24,10 +26,6 @@ if ! command -v "$SQLCMD" >/dev/null 2>&1; then
   echo "sqlcmd não encontrado. Instale o SQL Server Command Line Utilities ou defina SQLCMD." >&2
   exit 1
 fi
-if [[ -z "${CLIENT_IP:-}" ]]; then
-  echo "Defina CLIENT_IP com o IPv4 público exato para autorizar este host no firewall do Azure SQL." >&2
-  exit 1
-fi
 if [[ ! "$DATABASE_USERNAME" =~ ^[A-Za-z_][A-Za-z0-9_@#\$-]{0,127}$ ]]; then
   echo "DATABASE_USERNAME deve ser um identificador SQL simples (letras, números, _, @, #, $ ou -)." >&2
   exit 1
@@ -38,18 +36,48 @@ if [[ "$DATABASE_USERNAME" == "$SQL_ADMIN_USERNAME" ]]; then
 fi
 
 SQLCMD_SERVER="tcp:${SQL_SERVER_NAME}.database.windows.net,1433"
+SQL_MAX_ATTEMPTS="${SQL_MAX_ATTEMPTS:-8}"
+SQL_RETRY_DELAY="${SQL_RETRY_DELAY:-15}"
+SQL_OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/dimdim-sqlcmd.XXXXXX")"
+
+# Executa um arquivo .sql. Só repete em falha de conexão/firewall; erro de SQL aborta.
+# -N: conexão criptografada; -l 30: login timeout de 30s (válidos no sqlcmd ODBC e no go-sqlcmd).
+run_sqlcmd() {
+  local sql_file="$1" attempt rc
+  for attempt in $(seq 1 "$SQL_MAX_ATTEMPTS"); do
+    rc=0
+    SQLCMDPASSWORD="$SQL_ADMIN_PASSWORD" "$SQLCMD" \
+      -S "$SQLCMD_SERVER" \
+      -d "$SQL_DATABASE_NAME" \
+      -U "$SQL_ADMIN_USERNAME" \
+      -N \
+      -l 30 \
+      -b \
+      -i "$sql_file" > "$SQL_OUT_FILE" 2>&1 || rc=$?
+    mask_ips < "$SQL_OUT_FILE"
+    if (( rc == 0 )); then
+      return 0
+    fi
+    if grep -qiE 'not allowed to access the server|login timeout|network-related|instance-specific|TCP Provider|connection (was )?(refused|reset)|could not open a connection|timeout expired|is not currently available' "$SQL_OUT_FILE"; then
+      if (( attempt < SQL_MAX_ATTEMPTS )); then
+        echo "    falha de conexão/firewall (tentativa $attempt/$SQL_MAX_ATTEMPTS, sqlcmd saiu com $rc); nova tentativa em ${SQL_RETRY_DELAY}s (a regra de firewall pode levar alguns segundos para propagar)..." >&2
+        sleep "$SQL_RETRY_DELAY"
+        continue
+      fi
+      echo "ERRO: sem conexão com o Azure SQL após $SQL_MAX_ATTEMPTS tentativas. Confira o firewall (AllowTemporaryClientIP) e o IP detectado." >&2
+      return 1
+    fi
+    echo "ERRO de SQL (sem nova tentativa; sqlcmd saiu com $rc). Corrija o script e execute novamente." >&2
+    return 1
+  done
+}
+
 echo "Aplicando DDL ao Azure SQL Database '$SQL_DATABASE_NAME'..."
-SQLCMDPASSWORD="$SQL_ADMIN_PASSWORD" "$SQLCMD" \
-  -S "$SQLCMD_SERVER" \
-  -d "$SQL_DATABASE_NAME" \
-  -U "$SQL_ADMIN_USERNAME" \
-  -N \
-  -b \
-  -i "$SCRIPT_DIR/azure-sql.sql"
+run_sqlcmd "$SCRIPT_DIR/azure-sql.sql"
 
 PASSWORD_SQL="$(printf '%s' "$DATABASE_PASSWORD" | sed "s/'/''/g")"
 USER_SQL_FILE="$(mktemp "${TMPDIR:-/tmp}/dimdim-user.XXXXXX.sql")"
-trap 'rm -f "$USER_SQL_FILE"' EXIT
+trap 'rm -f "$USER_SQL_FILE" "$SQL_OUT_FILE"' EXIT
 cat > "$USER_SQL_FILE" <<SQL
 IF DATABASE_PRINCIPAL_ID(N'${DATABASE_USERNAME}') IS NULL
 BEGIN
@@ -80,12 +108,6 @@ IF NOT EXISTS (
 SQL
 
 echo "Criando/atualizando usuário restrito da aplicação e permissões CRUD..."
-SQLCMDPASSWORD="$SQL_ADMIN_PASSWORD" "$SQLCMD" \
-  -S "$SQLCMD_SERVER" \
-  -d "$SQL_DATABASE_NAME" \
-  -U "$SQL_ADMIN_USERNAME" \
-  -N \
-  -b \
-  -i "$USER_SQL_FILE"
+run_sqlcmd "$USER_SQL_FILE"
 
 echo "Azure SQL inicializado. A aplicação usa '$DATABASE_USERNAME' (sem privilégios de administração do servidor)."
