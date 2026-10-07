@@ -204,6 +204,8 @@ APP_SETTINGS_FILE="$(mktemp "${TMPDIR:-/tmp}/dimdim-appsettings.XXXXXX.json")"
   json_value "$APP_INSIGHTS_CONNECTION_STRING"
   printf ',\n  "APPLICATIONINSIGHTS_ROLE_NAME": '
   json_value "dimdim"
+  printf ',\n  "WEBSITES_CONTAINER_START_TIME_LIMIT": '
+  json_value "600"
   printf ',\n  "SPRING_PROFILES_ACTIVE": '
   json_value "azure"
   printf '\n}\n'
@@ -251,8 +253,8 @@ az webapp deploy \
   --track-status false
 
 APP_URL="https://${WEB_APP_NAME}.azurewebsites.net"
-echo "Aguardando o App Service responder em $APP_URL ..."
-for attempt in {1..36}; do
+echo "Aguardando o App Service responder em $APP_URL (a primeira inicialização do Java no plano B1 pode levar vários minutos)..."
+for attempt in {1..90}; do
   if BASE_URL="$APP_URL" "$SCRIPT_DIR/validate.sh"; then
     echo "Deploy e smoke test concluídos: $APP_URL"
     echo "Swagger UI: $APP_URL/swagger"
@@ -261,6 +263,6 @@ for attempt in {1..36}; do
   sleep 10
 done
 
-echo "O deploy foi enviado, mas a aplicação não passou no smoke test dentro de 6 minutos." >&2
+echo "O deploy foi enviado, mas a aplicação não passou no smoke test dentro de ~15 minutos." >&2
 echo "Consulte o log do App Service e verifique DATABASE_URL/credenciais de banco." >&2
 exit 1
