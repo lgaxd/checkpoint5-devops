@@ -1,0 +1,20 @@
+{
+  "GET /api/fazendas": [
+    {
+      "id": 1,
+      "usuarioId": 1,
+      "nome": "Fazenda Horizonte",
+      "cidade": "Ribeirao Preto",
+      "estado": "SP",
+      "areaHectares": 120.5
+    }
+  ],
+  "GET /api/fazendas/1": {
+    "id": 1,
+    "usuarioId": 1,
+    "nome": "Fazenda Horizonte",
+    "cidade": "Ribeirao Preto",
+    "estado": "SP",
+    "areaHectares": 120.5
+  }
+}

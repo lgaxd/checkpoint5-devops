@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DimDim | Usuários e fazendas</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, system-ui, sans-serif; color: #19352e; background: #f3f7f4; }
+    body { max-width: 1040px; margin: 0 auto; padding: 2rem 1rem; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 2rem; }
+    h1, h2 { margin: 0; }
+    header p { color: #527267; margin: .4rem 0 0; }
+    .status { font-size: .9rem; color: #527267; }
+    main { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem; }
+    section { background: white; border: 1px solid #dce8e0; border-radius: 14px; padding: 1.25rem; box-shadow: 0 8px 24px #19352e0c; }
+    form { display: grid; gap: .7rem; margin: 1rem 0; }
+    label { display: grid; gap: .3rem; font-size: .9rem; }
+    input, select, button { font: inherit; padding: .65rem .75rem; border: 1px solid #cadbd0; border-radius: 8px; }
+    button { cursor: pointer; background: #176b4d; color: white; border: 0; font-weight: 600; }
+    button.secondary { background: #e9f2ec; color: #176b4d; }
+    button.danger { background: #a73535; }
+    .item { display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: .75rem 0; border-top: 1px solid #e7eee9; }
+    .item p { margin: .2rem 0; color: #527267; font-size: .9rem; }
+    .actions { display: flex; gap: .4rem; }
+    .actions button { padding: .45rem .6rem; font-size: .85rem; }
+    #message { min-height: 1.4rem; margin: 1rem 0 0; }
+    #message.error { color: #a73535; }
+    #message.success { color: #176b4d; }
+    @media (max-width: 520px) { header { align-items: flex-start; flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>DimDim</h1>
+      <p>Cadastre usuários e acompanhe as fazendas relacionadas.</p>
+    </div>
+    <div>
+      <span class="status" id="status">Faça login para continuar</span>
+      <button class="secondary" id="logout" type="button" hidden>Sair</button>
+    </div>
+  </header>
+
+  <section id="auth-panel">
+    <h2 id="auth-title">Entrar</h2>
+    <form id="auth-form">
+      <label id="auth-name-label" hidden>Nome<input id="auth-name" maxlength="100"></label>
+      <label>E-mail<input id="auth-email" type="email" maxlength="150" required></label>
+      <label>Senha<input id="auth-password" type="password" minlength="8" required></label>
+      <button id="auth-submit">Entrar</button>
+      <button class="secondary" id="auth-toggle" type="button">Criar conta</button>
+    </form>
+  </section>
+
+  <main id="app" hidden>
+    <section>
+      <h2>Usuários</h2>
+      <form id="user-form">
+        <input type="hidden" id="user-id">
+        <label>Nome<input id="user-name" maxlength="100" required></label>
+        <label>E-mail<input id="user-email" type="email" maxlength="150" required></label>
+        <label id="user-password-label">Senha<input id="user-password" type="password" minlength="8" required></label>
+        <button id="user-submit">Adicionar usuário</button>
+        <button class="secondary" id="user-cancel" type="button" hidden>Cancelar edição</button>
+      </form>
+      <div id="users"></div>
+    </section>
+
+    <section>
+      <h2>Fazendas</h2>
+      <form id="farm-form">
+        <input type="hidden" id="farm-id">
+        <label>Responsável<select id="farm-user" required></select></label>
+        <label>Nome<input id="farm-name" maxlength="150" required></label>
+        <label>Cidade<input id="farm-city" maxlength="100" required></label>
+        <label>Estado (UF)<input id="farm-state" maxlength="2" minlength="2" required></label>
+        <label>Área (hectares)<input id="farm-area" type="number" min="0.01" step="0.01" required></label>
+        <button id="farm-submit">Adicionar fazenda</button>
+        <button class="secondary" id="farm-cancel" type="button" hidden>Cancelar edição</button>
+      </form>
+      <div id="farms"></div>
+    </section>
+  </main>
+  <p id="message" role="status" aria-live="polite"></p>
+
+  <script>
+    const api = "/api";
+    const authPanel = document.querySelector("#auth-panel");
+    const app = document.querySelector("#app");
+    const usersEl = document.querySelector("#users");
+    const farmsEl = document.querySelector("#farms");
+    const userSelect = document.querySelector("#farm-user");
+    const message = document.querySelector("#message");
+    let users = [];
+    let farms = [];
+    let authMode = "login";
+
+    async function request(path, options = {}) {
+      const response = await fetch(`${api}${path}`, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...(localStorage.getItem("dimdim-token")
+            ? { Authorization: `Bearer ${localStorage.getItem("dimdim-token")}` }
+            : {}),
+          ...(options.headers || {})
+        }
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.message || `Falha na solicitação (${response.status}).`);
+      }
+      return response.status === 204 ? null : response.json();
+    }
+
+    function notify(text, isError = false) {
+      message.textContent = text;
+      message.className = isError ? "error" : "success";
+    }
+
+    async function refresh() {
+      [users, farms] = await Promise.all([
+        request("/usuarios"),
+        request("/fazendas")
+      ]);
+      document.querySelector("#status").textContent = "API e banco de dados disponíveis";
+      userSelect.replaceChildren(new Option("Selecione um usuário", ""));
+      users.forEach(user => userSelect.add(new Option(`${user.nome} (${user.email})`, user.id)));
+
+      usersEl.replaceChildren(...users.map(user => {
+        const item = document.createElement("article");
+        item.className = "item";
+        const info = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = user.nome;
+        const email = document.createElement("p");
+        email.textContent = user.email;
+        info.append(name, email);
+        item.append(info, actions("user", user));
+        return item;
+      }));
+
+      farmsEl.replaceChildren(...farms.map(farm => {
+        const item = document.createElement("article");
+        item.className = "item";
+        const info = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = farm.nome;
+        const owner = users.find(user => user.id === farm.usuarioId);
+        const details = document.createElement("p");
+        details.textContent = `${farm.cidade}/${farm.estado} · ${farm.areaHectares} ha · ${owner ? owner.nome : "Usuário " + farm.usuarioId}`;
+        info.append(name, details);
+        item.append(info, actions("farm", farm));
+        return item;
+      }));
+    }
+
+    function actions(type, item) {
+      const group = document.createElement("div");
+      group.className = "actions";
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "secondary";
+      edit.textContent = "Editar";
+      edit.addEventListener("click", () => editItem(type, item));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "danger";
+      remove.textContent = "Excluir";
+      remove.addEventListener("click", () => deleteItem(type, item));
+      group.append(edit, remove);
+      return group;
+    }
+
+    function editItem(type, item) {
+      const isUser = type === "user";
+      document.querySelector(`#${type}-id`).value = item.id;
+      if (isUser) {
+        document.querySelector("#user-name").value = item.nome;
+        document.querySelector("#user-email").value = item.email;
+        document.querySelector("#user-password-label").hidden = true;
+        document.querySelector("#user-password").required = false;
+      } else {
+        userSelect.value = item.usuarioId;
+        document.querySelector("#farm-name").value = item.nome;
+        document.querySelector("#farm-city").value = item.cidade;
+        document.querySelector("#farm-state").value = item.estado;
+        document.querySelector("#farm-area").value = item.areaHectares;
+      }
+      document.querySelector(`#${type}-submit`).textContent = "Salvar alterações";
+      document.querySelector(`#${type}-cancel`).hidden = false;
+    }
+
+    async function deleteItem(type, item) {
+      const label = type === "user" ? "usuário" : "fazenda";
+      if (!confirm(`Excluir este ${label}?`)) return;
+      try {
+        await request(`/${type === "user" ? "usuarios" : "fazendas"}/${item.id}`, { method: "DELETE" });
+        await refresh();
+        notify(`${label[0].toUpperCase()}${label.slice(1)} excluído.`);
+      } catch (error) {
+        notify(error.message, true);
+      }
+    }
+
+    function resetForm(type) {
+      document.querySelector(`#${type}-form`).reset();
+      document.querySelector(`#${type}-id`).value = "";
+      document.querySelector(`#${type}-submit`).textContent = `Adicionar ${type === "user" ? "usuário" : "fazenda"}`;
+      document.querySelector(`#${type}-cancel`).hidden = true;
+      if (type === "user") {
+        document.querySelector("#user-password-label").hidden = false;
+        document.querySelector("#user-password").required = true;
+      }
+    }
+
+    document.querySelector("#user-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const id = document.querySelector("#user-id").value;
+      const body = {
+        nome: document.querySelector("#user-name").value.trim(),
+        email: document.querySelector("#user-email").value.trim()
+      };
+      if (!id) body.senha = document.querySelector("#user-password").value;
+      try {
+        await request(`/usuarios${id ? `/${id}` : ""}`, {
+          method: id ? "PUT" : "POST",
+          body: JSON.stringify(body)
+        });
+        resetForm("user");
+        await refresh();
+        notify("Usuário salvo.");
+      } catch (error) {
+        notify(error.message, true);
+      }
+    });
+
+    document.querySelector("#farm-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const id = document.querySelector("#farm-id").value;
+      const body = {
+        usuarioId: Number(userSelect.value),
+        nome: document.querySelector("#farm-name").value.trim(),
+        cidade: document.querySelector("#farm-city").value.trim(),
+        estado: document.querySelector("#farm-state").value.trim().toUpperCase(),
+        areaHectares: Number(document.querySelector("#farm-area").value)
+      };
+      try {
+        await request(`/fazendas${id ? `/${id}` : ""}`, {
+          method: id ? "PUT" : "POST",
+          body: JSON.stringify(body)
+        });
+        resetForm("farm");
+        await refresh();
+        notify("Fazenda salva.");
+      } catch (error) {
+        notify(error.message, true);
+      }
+    });
+
+    document.querySelector("#user-cancel").addEventListener("click", () => resetForm("user"));
+    document.querySelector("#farm-cancel").addEventListener("click", () => resetForm("farm"));
+
+    document.querySelector("#auth-toggle").addEventListener("click", () => {
+      authMode = authMode === "login" ? "register" : "login";
+      document.querySelector("#auth-title").textContent = authMode === "login" ? "Entrar" : "Criar conta";
+      document.querySelector("#auth-name-label").hidden = authMode !== "register";
+      document.querySelector("#auth-name").required = authMode === "register";
+      document.querySelector("#auth-submit").textContent = authMode === "login" ? "Entrar" : "Criar conta";
+      document.querySelector("#auth-toggle").textContent = authMode === "login" ? "Criar conta" : "Já tenho conta";
+    });
+
+    document.querySelector("#auth-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const body = {
+        email: document.querySelector("#auth-email").value.trim(),
+        senha: document.querySelector("#auth-password").value
+      };
+      let path = "/auth/login";
+      if (authMode === "register") {
+        path = "/auth/register";
+        body.nome = document.querySelector("#auth-name").value.trim();
+      }
+      try {
+        const result = await request(path, { method: "POST", body: JSON.stringify(body) });
+        localStorage.setItem("dimdim-token", result.token);
+        authPanel.hidden = true;
+        app.hidden = false;
+        document.querySelector("#logout").hidden = false;
+        document.querySelector("#status").textContent = `Conectado como ${result.usuario.nome}`;
+        await refresh();
+        notify("Sessão iniciada.");
+      } catch (error) {
+        notify(error.message, true);
+      }
+    });
+
+    document.querySelector("#logout").addEventListener("click", () => {
+      localStorage.removeItem("dimdim-token");
+      app.hidden = true;
+      authPanel.hidden = false;
+      document.querySelector("#logout").hidden = true;
+      document.querySelector("#status").textContent = "Faça login para continuar";
+      notify("Sessão encerrada.");
+    });
+
+    if (localStorage.getItem("dimdim-token")) {
+      authPanel.hidden = true;
+      app.hidden = false;
+      document.querySelector("#logout").hidden = false;
+      refresh().catch(error => {
+        localStorage.removeItem("dimdim-token");
+        app.hidden = true;
+        authPanel.hidden = false;
+        document.querySelector("#logout").hidden = true;
+        document.querySelector("#status").textContent = "Sessão expirada; entre novamente";
+        notify(error.message, true);
+      });
+    }
+  </script>
+</body>
+</html>

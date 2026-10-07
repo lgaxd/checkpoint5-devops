@@ -1,0 +1,14 @@
+{
+  "GET /api/usuarios": [
+    {
+      "id": 1,
+      "nome": "Ana Silva",
+      "email": "ana@example.com"
+    }
+  ],
+  "GET /api/usuarios/1": {
+    "id": 1,
+    "nome": "Ana Silva",
+    "email": "ana@example.com"
+  }
+}

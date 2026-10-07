@@ -1,0 +1,18 @@
+{
+  "request": {
+    "usuarioId": 1,
+    "nome": "Fazenda Horizonte II",
+    "cidade": "Ribeirao Preto",
+    "estado": "SP",
+    "areaHectares": 135.0
+  },
+  "response": {
+    "id": 1,
+    "usuarioId": 1,
+    "nome": "Fazenda Horizonte II",
+    "cidade": "Ribeirao Preto",
+    "estado": "SP",
+    "areaHectares": 135.0
+  },
+  "status": 200
+}

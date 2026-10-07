@@ -1,0 +1,16 @@
+{
+  "request": {
+    "nome": "Ana Silva",
+    "email": "ana@example.com",
+    "senha": "senha-de-exemplo-nao-utilizar"
+  },
+  "response": {
+    "token": "<JWT retornado pela API>",
+    "usuario": {
+      "id": 1,
+      "nome": "Ana Silva",
+      "email": "ana@example.com"
+    }
+  },
+  "status": 201
+}

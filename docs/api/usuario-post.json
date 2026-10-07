@@ -1,0 +1,13 @@
+{
+  "request": {
+    "nome": "Ana Silva",
+    "email": "ana@example.com",
+    "senha": "SenhaSegura!123"
+  },
+  "response": {
+    "id": 1,
+    "nome": "Ana Silva",
+    "email": "ana@example.com"
+  },
+  "status": 201
+}

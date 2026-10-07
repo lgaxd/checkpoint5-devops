@@ -1,0 +1,8 @@
+{
+  "request": {
+    "method": "DELETE",
+    "url": "/api/fazendas/1"
+  },
+  "response": null,
+  "status": 204
+}
