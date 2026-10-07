@@ -175,6 +175,16 @@ class DimdimApplicationTests {
                 .andExpect(status().isUnauthorized());
     }
 
+    @Test
+    void actuatorHealthIsPublic() throws Exception {
+        mockMvc.perform(get("/actuator/health"))
+                .andExpect(result -> {
+                    if (result.getResponse().getStatus() == 401) {
+                        throw new AssertionError("/actuator/health não deve exigir autenticação.");
+                    }
+                });
+    }
+
     private String register(String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)

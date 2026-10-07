@@ -41,7 +41,7 @@ docs/entrega.md                      dados de apoio para o PDF
 - Maven Wrapper incluído (`mvnw`); não é necessário instalar Maven.
 - Bash (WSL ou Git Bash no Windows), `curl`, `zip` e `sqlcmd`.
 - Uma subscription Azure com permissões para criar Resource Group, Azure SQL, App Service e Application Insights.
-- `CLIENT_IP` configurado para permitir o `sqlcmd` do host do deploy no firewall do Azure SQL.
+- Acesso de rede do host do deploy ao Azure SQL (o `CLIENT_IP` é detectado e liberado no firewall; veja [Variáveis de ambiente](#variáveis-de-ambiente)).
 
 ## Configuração local
 
@@ -75,9 +75,19 @@ Consulte [`.env.example`](.env.example). As variáveis sensíveis obrigatórias 
 
 Gere `JWT_SECRET` localmente com `openssl rand -base64 32` e guarde o valor apenas no `.env` (e nos App Settings do Azure). Não use uma chave de exemplo em produção.
 
-As principais variáveis de nomenclatura têm valores padrão, mas podem ser alteradas no `.env`: `RM`, `LOCATION`, `RESOURCE_GROUP`, `SQL_SERVER_NAME`, `SQL_DATABASE_NAME`, `APP_SERVICE_PLAN`, `WEB_APP_NAME` e `APP_INSIGHTS_NAME`. O nome de Web App precisa ser globalmente único. `AZURE_SUBSCRIPTION_ID` é opcional se a subscription correta já estiver ativa.
+As principais variáveis de nomenclatura têm valores padrão, mas podem ser alteradas no `.env`: `RM`, `RESOURCE_GROUP`, `SQL_SERVER_NAME`, `SQL_DATABASE_NAME`, `APP_SERVICE_PLAN`, `WEB_APP_NAME` e `APP_INSIGHTS_NAME`. O nome de Web App precisa ser globalmente único.
 
-`CLIENT_IP` deve conter o IPv4 público exato do host que executa o deploy e `sqlcmd`; o fluxo automatizado o utiliza para inicializar Azure SQL. Isso cria somente uma regra individual chamada `AllowTemporaryClientIP`. O valor especial `0.0.0.0` a `0.0.0.0` da regra `AllowAzureServices` permite conexões originadas em serviços hospedados no Azure e não é uma liberação universal. Remova a regra temporária após o trabalho:
+Variáveis de região e rede:
+
+| Variável | Obrigatória | Padrão | Descrição |
+|---|---|---|---|
+| `LOCATION` | não | `eastus2` | Região do Resource Group, App Service Plan, Web App e Application Insights. |
+| `SQL_LOCATION` | não | valor de `LOCATION` | Região do Azure SQL Server. Use outra região apenas se a primeira não tiver capacidade para SQL. |
+| `CLIENT_IP` | não | detectado automaticamente | IPv4 público do host que executa o deploy; pode ser informado manualmente se a detecção falhar. |
+
+Em produção a aplicação roda com `SPRING_PROFILES_ACTIVE=azure`, que carrega [`application-azure.properties`](src/main/resources/application-azure.properties): o pool Hikari não derruba a subida se o banco estiver indisponível (`initialization-fail-timeout=-1`), o Hibernate não consulta metadados JDBC na inicialização e os probes de health do Actuator ficam habilitados. Essas propriedades existem somente nesse perfil; os testes (perfil `test`, H2) não são afetados. O App Service usa a porta 8080 (explícita) e Always On fica ativado. `AZURE_SUBSCRIPTION_ID` é opcional se a subscription correta já estiver ativa.
+
+`CLIENT_IP` é o IPv4 público exato do host que executa o deploy e `sqlcmd`; é detectado automaticamente e só precisa ser definido se a detecção falhar. O fluxo automatizado o utiliza para inicializar Azure SQL. Isso cria somente uma regra individual chamada `AllowTemporaryClientIP`. O valor especial `0.0.0.0` a `0.0.0.0` da regra `AllowAzureServices` permite conexões originadas em serviços hospedados no Azure e não é uma liberação universal. Remova a regra temporária após o trabalho:
 
 ```bash
 az sql server firewall-rule delete \
@@ -94,6 +104,8 @@ O script `azure-sql-init.sh` aplica o DDL e cria/atualiza o usuário contido da 
 
 ## Criação da infraestrutura e deploy
 
+> **⚠️ AVISO — não crie App Service Plan em loop nem rode teardown entre tentativas.** Criar e apagar planos repetidamente na mesma região pode fazer a Azure bloquear a capacidade daquela região por tempo prolongado. Se algo falhar depois que a infraestrutura existe, **corrija e use `--app-only`** (build + deploy + validação, sem recriar nada). Use `--preflight-only` antes de qualquer criação e só rode o teardown ao final do trabalho.
+
 1. Copie e preencha `.env`.
 2. Faça login e confirme a subscription:
 
@@ -105,14 +117,31 @@ O script `azure-sql-init.sh` aplica o DDL e cria/atualiza o usuário contido da 
    az account show --output table
    ```
 
-3. Gere e preencha `JWT_SECRET`. Preencha também `CLIENT_IP` com o IPv4 público exato da máquina que executará `sqlcmd`. Como o deploy inicializa o banco a partir desse host, essa regra individual é necessária para o fluxo automatizado. Se já existir uma regra temporária e seu IP mudou, o script a atualiza.
-4. Execute:
+3. Gere e preencha `JWT_SECRET` (`openssl rand -base64 32`). `LOCATION` (padrão `eastus2`), `SQL_LOCATION` e `CLIENT_IP` são opcionais.
+4. **Rode primeiro o preflight** (somente leitura, não cria nada):
+
+   ```bash
+   bash scripts/azure-deploy.sh --preflight-only
+   ```
+
+5. Execute o fluxo completo:
 
    ```bash
    bash scripts/azure-deploy.sh
    ```
 
-O script cria/reutiliza Resource Group, Azure SQL Server, database, regra restrita para serviços Azure e regra do IP local, App Service Plan Linux B1, Web App Java 21 e Application Insights. Inicializa o DDL e o usuário de banco, executa `./mvnw clean test package`, baixa o Application Insights Java Agent oficial (versão 3.7.9), prepara o pacote, configura App Settings (incluindo o `JWT_SECRET`) e publica via `az webapp deploy`. Por fim, valida health e consultas que acessam o banco.
+Modos do script:
+
+| Comando | O que faz |
+|---|---|
+| `bash scripts/azure-deploy.sh` | Fluxo completo: infraestrutura, banco, build, deploy e validação. |
+| `bash scripts/azure-deploy.sh --preflight-only` | Somente leitura. Rode antes de tudo. |
+| `bash scripts/azure-deploy.sh --infra-only` | Cria/reutiliza apenas a infraestrutura. |
+| `bash scripts/azure-deploy.sh --app-only` | Ciclo rápido de correções: build + deploy + validação, sem recriar a infraestrutura. |
+
+Cada execução grava um log em `logs/deploy-<modo>-<timestamp>.log`; confira que não contém segredos antes de compartilhá-lo.
+
+O fluxo completo cria/reutiliza Resource Group, Azure SQL Server, database, regra restrita para serviços Azure e regra do IP local, App Service Plan Linux B1, Web App Java 21 (porta 8080 explícita, Always On ativado) e Application Insights. Inicializa o DDL e o usuário de banco, executa `./mvnw clean test package`, baixa o Application Insights Java Agent oficial (versão 3.7.9), prepara o pacote, configura App Settings (incluindo o `JWT_SECRET`) e publica via `az webapp deploy`. Por fim, valida a aplicação em duas fases (veja [Validação](#validação)).
 
 O Application Insights connection string é consultado no recurso Azure durante o deploy e armazenado apenas nos App Settings do Web App (`APPLICATIONINSIGHTS_CONNECTION_STRING`). O agente Java é iniciado com `-javaagent` e coleta telemetria de requests, dependências, logs, métricas e exceções. Nenhum connection string é salvo no repositório.
 
@@ -120,11 +149,20 @@ Se o `WEB_APP_NAME` padrão já estiver ocupado, escolha outro valor globalmente
 
 ## Validação
 
-O script [validate.sh](scripts/validate.sh) verifica `/actuator/health`. O health check do Spring Boot inclui o datasource, portanto também verifica a conexão com o Azure SQL. As APIs CRUD exigem JWT e não são chamadas sem autenticação pelo script:
+O deploy valida a aplicação em duas fases:
+
+1. `GET /` — confirma que o container subiu e responde na porta 8080 (não depende do banco).
+2. `GET /actuator/health` — confirma a aplicação e a conexão com o Azure SQL (o health do Spring Boot inclui o datasource).
+
+Se alguma fase falhar por tempo, o script coleta automaticamente os logs do App Service.
+
+O script [validate.sh](scripts/validate.sh) também pode ser executado isoladamente. As APIs CRUD exigem JWT e não são chamadas sem autenticação pelo script:
 
 ```bash
 BASE_URL="https://SEU-WEB-APP.azurewebsites.net" bash scripts/validate.sh
 ```
+
+Interpretação rápida: `/` OK e health OK = tudo certo; `/` OK e health `DOWN` = problema de banco/credenciais; `/` sem resposta = problema no container ou na porta.
 
 URLs da aplicação:
 
@@ -217,7 +255,7 @@ Após o deploy, abra o recurso Application Insights configurado em `APP_INSIGHTS
 Grave em 720p ou superior, com explicação falada:
 
 1. Provisionamento (ou recursos já criados), App Service, Azure SQL e Application Insights.
-2. Build/testes e deploy executados por `scripts/azure-deploy.sh` com `az webapp deploy`.
+2. Preflight (`--preflight-only`), build/testes e deploy executados por `scripts/azure-deploy.sh` com `az webapp deploy`, mostrando o log gerado em `logs/`.
 3. Interface Web ou Swagger, incluindo CREATE, READ, UPDATE e DELETE de Usuário e Fazenda.
 4. Consultas no Azure SQL após operações para demonstrar persistência e FK.
 5. Requests/telemetria visíveis no Application Insights.
@@ -226,10 +264,15 @@ O roteiro detalhado do vídeo, com fala sugerida, comandos e minutagem, está em
 
 ## Troubleshooting
 
+- **Região sem capacidade para SQL ou B1**: erros como `RegionDoesNotAllowProvisioning` ou "not available in this region". Rode `--preflight-only`, defina `SQL_LOCATION` com outra região (o SQL pode ficar em região diferente do App Service) ou altere `LOCATION`. Não crie e apague planos repetidamente (veja o aviso acima).
+- **Firewall demorando a propagar**: a regra do `CLIENT_IP` pode levar alguns minutos para valer. Se o `sqlcmd` falhar logo após criar a regra, aguarde e repita; não amplie a faixa de IPs.
+- **Container não responde na porta**: `/` não responde dentro do tempo. Confirme que a porta 8080 está configurada no App Service e que `PORT`/`WEBSITES_PORT` não apontam para outra porta; leia os logs coletados pelo script (e o `logs/deploy-*.log`) procurando, por exemplo, `JWT_SECRET` inválido/curto, que impede a aplicação de subir. Corrija e use `--app-only`.
+- **Health `DOWN` com `/` OK**: a aplicação subiu, mas o banco não responde. Verifique `DATABASE_URL`, `DATABASE_USERNAME` e `DATABASE_PASSWORD` nos App Settings, a regra `AllowAzureServices` e se o usuário contido foi criado por `azure-sql-init.sh`. Corrija e use `--app-only`.
 - **Erro de firewall/timeout SQL**: confirme `CLIENT_IP`, a regra temporária e se `AllowAzureServices` existe. Não abra uma faixa ampla.
 - **Login SQL falha**: confira `SQL_ADMIN_USERNAME`, `SQL_ADMIN_PASSWORD`, `DATABASE_USERNAME` e `DATABASE_PASSWORD`; confirme que `DATABASE_USERNAME` difere do administrador e rode novamente `bash scripts/azure-sql-init.sh`.
 - **JWT inválido/401**: confirme o token Bearer e `JWT_SECRET`; o valor da chave não pode mudar entre a emissão e validação do token.
 - **Nome de Web App ocupado**: altere `WEB_APP_NAME` para um nome globalmente único.
+- **Erro real aparecendo como 401**: a rota `/error` e `/actuator/health/**` são públicas, então falhas de endpoints públicos aparecem com o status real em vez de 401.
 - **Aplicação retorna 500 no deploy**: valide que o DDL foi executado, confira App Settings e logs de diagnóstico do App Service.
 - **Telemetria não aparece imediatamente**: gere requests na aplicação e aguarde alguns minutos; confirme `APPLICATIONINSIGHTS_CONNECTION_STRING` nos App Settings.
 - **`sqlcmd` ausente**: instale o SQL Server Command Line Utilities para seu sistema e confirme `sqlcmd --version`.
@@ -242,7 +285,7 @@ O teardown pede o nome completo do Resource Group; nenhuma exclusão ocorre sem 
 bash scripts/azure-teardown.sh
 ```
 
-Confirme que o Resource Group configurado é exclusivo do projeto. O comando exclui o grupo e todos os seus recursos/dados de forma assíncrona.
+Não rode o teardown entre tentativas de deploy (veja o aviso em [Criação da infraestrutura e deploy](#criação-da-infraestrutura-e-deploy)); use-o somente depois de salvar as evidências. Confirme que o Resource Group configurado é exclusivo do projeto. O comando exclui o grupo e todos os seus recursos/dados de forma assíncrona.
 
 ## Integrantes
 
