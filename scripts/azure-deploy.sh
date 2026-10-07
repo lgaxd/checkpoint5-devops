@@ -81,9 +81,17 @@ fi
 
 echo "Criando ou atualizando recursos do DimDim na subscription $(az account show --query id -o tsv)..."
 az group create --name "$RESOURCE_GROUP" --location "$LOCATION" --output none
-az provider register --namespace Microsoft.Sql --wait
-az provider register --namespace Microsoft.Insights --wait
-az provider register --namespace Microsoft.OperationalInsights --wait
+for provider in Microsoft.Sql Microsoft.Insights Microsoft.OperationalInsights; do
+  state="$(az provider show --namespace "$provider" --query registrationState --output tsv 2>/dev/null || true)"
+  if [[ "$state" != "Registered" ]]; then
+    az provider register --namespace "$provider" --output none
+    for _ in {1..30}; do
+      state="$(az provider show --namespace "$provider" --query registrationState --output tsv 2>/dev/null || true)"
+      [[ "$state" == "Registered" ]] && break
+      sleep 5
+    done
+  fi
+done
 
 if ! az sql server show --resource-group "$RESOURCE_GROUP" --name "$SQL_SERVER_NAME" --output none >/dev/null 2>&1; then
   az sql server create \
@@ -93,7 +101,15 @@ if ! az sql server show --resource-group "$RESOURCE_GROUP" --name "$SQL_SERVER_N
     --admin-user "$SQL_ADMIN_USERNAME" \
     --admin-password "$SQL_ADMIN_PASSWORD" \
     --enable-public-network true \
-    --output none
+    --no-wait \
+    --output none 2>/dev/null
+  echo "Aguardando o SQL Server ficar pronto..."
+  for _ in {1..60}; do
+    state="$(az sql server show --resource-group "$RESOURCE_GROUP" --name "$SQL_SERVER_NAME" --query state --output tsv 2>/dev/null || true)"
+    [[ "$state" == "Ready" ]] && break
+    sleep 5
+  done
+  if [[ "$state" != "Ready" ]]; then echo "SQL Server não ficou pronto em 5 min." >&2; exit 1; fi
 fi
 
 ensure_firewall_rule() {
@@ -145,7 +161,14 @@ if ! az appservice plan show --resource-group "$RESOURCE_GROUP" --name "$APP_SER
     --location "$LOCATION" \
     --is-linux \
     --sku B1 \
-    --output none
+    --output none || {
+      echo "Criação do plano limitada (throttling) pelo Azure; tentando de novo em 60s..."
+      for _ in 1 2 3 4 5; do
+        sleep 60
+        az appservice plan create --resource-group "$RESOURCE_GROUP" --name "$APP_SERVICE_PLAN" --location "$LOCATION" --is-linux --sku B1 --output none && break
+      done
+      az appservice plan show --resource-group "$RESOURCE_GROUP" --name "$APP_SERVICE_PLAN" --output none
+    }
 fi
 
 if ! az webapp show --resource-group "$RESOURCE_GROUP" --name "$WEB_APP_NAME" --output none >/dev/null 2>&1; then
