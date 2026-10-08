@@ -1,44 +1,23 @@
 #!/usr/bin/env bash
+# Etapa 04 — Schema do Azure SQL: aplica o DDL (scripts/azure-sql.sql) e cria o usuário
+# contido da aplicação, apenas com db_datareader e db_datawriter (sem privilégio de admin).
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+step_begin "Schema do banco (DDL) e usuário restrito da aplicação"
+require_env SQL_ADMIN_USERNAME SQL_ADMIN_PASSWORD DATABASE_USERNAME DATABASE_PASSWORD
+require_tools "$SQLCMD"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# shellcheck source=lib-common.sh
-source "$SCRIPT_DIR/lib-common.sh"
-if [[ -f "$PROJECT_ROOT/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$PROJECT_ROOT/.env"
-  set +a
-fi
-
-RM="${RM:-561413}"
-SQL_SERVER_NAME="${SQL_SERVER_NAME:-sql-server-dimdim-${RM}}"
-SQL_DATABASE_NAME="${SQL_DATABASE_NAME:-db-dimdim}"
-SQLCMD="${SQLCMD:-sqlcmd}"
-
-: "${SQL_ADMIN_USERNAME:?Defina SQL_ADMIN_USERNAME no ambiente ou em .env}"
-: "${SQL_ADMIN_PASSWORD:?Defina SQL_ADMIN_PASSWORD no ambiente ou em .env}"
-: "${DATABASE_USERNAME:?Defina DATABASE_USERNAME no ambiente ou em .env}"
-: "${DATABASE_PASSWORD:?Defina DATABASE_PASSWORD no ambiente ou em .env}"
-
-if ! command -v "$SQLCMD" >/dev/null 2>&1; then
-  echo "sqlcmd não encontrado. Instale o SQL Server Command Line Utilities ou defina SQLCMD." >&2
-  exit 1
-fi
 if [[ ! "$DATABASE_USERNAME" =~ ^[A-Za-z_][A-Za-z0-9_@#\$-]{0,127}$ ]]; then
-  echo "DATABASE_USERNAME deve ser um identificador SQL simples (letras, números, _, @, #, $ ou -)." >&2
-  exit 1
+  die "DATABASE_USERNAME deve ser um identificador SQL simples (letras, números, _, @, #, $ ou -)."
 fi
-if [[ "$DATABASE_USERNAME" == "$SQL_ADMIN_USERNAME" ]]; then
-  echo "DATABASE_USERNAME deve ser diferente de SQL_ADMIN_USERNAME." >&2
-  exit 1
-fi
+[[ "$DATABASE_USERNAME" != "$SQL_ADMIN_USERNAME" ]] || die "DATABASE_USERNAME deve ser diferente de SQL_ADMIN_USERNAME."
 
 SQLCMD_SERVER="tcp:${SQL_SERVER_NAME}.database.windows.net,1433"
 SQL_MAX_ATTEMPTS="${SQL_MAX_ATTEMPTS:-8}"
 SQL_RETRY_DELAY="${SQL_RETRY_DELAY:-15}"
 SQL_OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/dimdim-sqlcmd.XXXXXX")"
+USER_SQL_FILE=""
+trap 'rc=$?; rm -f "$SQL_OUT_FILE" "$USER_SQL_FILE"; step_finish "$rc"' EXIT
 
 # Executa um arquivo .sql. Só repete em falha de conexão/firewall; erro de SQL aborta.
 # -N: conexão criptografada; -l 30: login timeout de 30s (válidos no sqlcmd ODBC e no go-sqlcmd).
@@ -77,7 +56,6 @@ run_sqlcmd "$SCRIPT_DIR/azure-sql.sql"
 
 PASSWORD_SQL="$(printf '%s' "$DATABASE_PASSWORD" | sed "s/'/''/g")"
 USER_SQL_FILE="$(mktemp "${TMPDIR:-/tmp}/dimdim-user.XXXXXX.sql")"
-trap 'rm -f "$USER_SQL_FILE" "$SQL_OUT_FILE"' EXIT
 cat > "$USER_SQL_FILE" <<SQL
 IF DATABASE_PRINCIPAL_ID(N'${DATABASE_USERNAME}') IS NULL
 BEGIN

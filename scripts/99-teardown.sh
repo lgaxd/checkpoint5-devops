@@ -1,21 +1,9 @@
 #!/usr/bin/env bash
+# Etapa 99 — Teardown: exclui o Resource Group e TODOS os seus recursos e dados.
+# Execute somente depois de gravar o vídeo e salvar as evidências.
 set -euo pipefail
-
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ -f "$PROJECT_ROOT/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$PROJECT_ROOT/.env"
-  set +a
-fi
-
-RM="${RM:-561413}"
-RESOURCE_GROUP="${RESOURCE_GROUP:-${RM}-dimdim-rg}"
-
-if ! az account show --output none >/dev/null 2>&1; then
-  echo "Faça login com 'az login' antes do teardown." >&2
-  exit 1
-fi
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+require_login
 
 echo "ATENÇÃO: todos os recursos e dados do Resource Group '$RESOURCE_GROUP' serão excluídos."
 read -r -p "Digite o nome exato do Resource Group para confirmar: " CONFIRMATION

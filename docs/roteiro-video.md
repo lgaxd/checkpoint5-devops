@@ -2,15 +2,15 @@
 
 Este roteiro segue os requisitos do checkpoint: mostrar o tutorial de implantação completo, com criação dos recursos em nuvem, o deploy acontecendo, a aplicação Web funcionando, CRUD nas duas tabelas com verificação no Azure SQL após cada operação e o monitoramento no Application Insights e no banco. Reserve aproximadamente **20 a 30 minutos** (estimativa; os tempos dependem da Azure), além de qualquer demora excepcional. Grave em **720p ou superior**, com explicação falada.
 
-> **Segurança:** não mostre `.env`, senhas, tokens JWT, connection strings ou dados pessoais reais. O script de deploy também imprime o ID da subscription e o IPv4 usado na regra temporária do SQL; oculte esses trechos na captura ou desfoque-os na edição, sem cortar a execução do deploy. Não use `set -x`.
+> **Segurança:** não mostre `.env`, senhas, tokens JWT, connection strings ou dados pessoais reais. As etapas 01 e 03 imprimem o nome da subscription e o IPv4 da regra temporária do SQL (já mascarado como `a.b.x.x`); se preferir, desfoque esses trechos na edição, sem cortar a execução. Não use `set -x`.
 
 ## Preparação antes da gravação
 
 Faça os preparativos fora da gravação para evitar pausas, mas **não faça o deploy antes**: a gravação precisa mostrar a execução real do script.
 
-1. Confirme que a subscription e a região autorizada estão selecionadas. A região é definida por `LOCATION` (padrão `eastus2`; `SQL_LOCATION` é opcional e, se ausente, usa `LOCATION`). Confira disponibilidade e quota na subscription antes do vídeo. Não exiba o `.env`.
+1. Confirme que a subscription e a região autorizada estão selecionadas. A região é definida por `LOCATION` (padrão `southcentralus`; `SQL_LOCATION` é opcional e, se ausente, usa `LOCATION`). Confira disponibilidade e quota na subscription antes do vídeo. Não exiba o `.env`.
 2. Confira o `CLIENT_IP` público atual, os nomes dos recursos e as credenciais no `.env`, sem imprimir nem compartilhar seus valores. O nome do Web App deve estar disponível globalmente.
-3. Rode, fora da gravação, `bash scripts/azure-deploy.sh --preflight-only` (somente leitura) e confirme que não há erros. **Não crie e apague App Service Plans em tentativas repetidas** nem rode teardown entre ensaios: a Azure pode bloquear a região por tempo prolongado.
+3. Rode, fora da gravação, `bash scripts/01-preflight.sh` (somente leitura) e confirme que não há erros. **Não crie e apague App Service Plans em tentativas repetidas** nem rode teardown entre ensaios: a Azure pode bloquear a região por tempo prolongado.
 4. No WSL ou Git Bash, abra a raiz do projeto e confira as ferramentas e a subscription ativa:
 
    ```bash
@@ -56,36 +56,34 @@ Confirme antes de gravar que `sqlcheck "SELECT TOP 1 ID_USUARIO FROM dbo.TB_USUA
 
 Regra do roteiro: **toda fala tem uma ação na tela ao mesmo tempo**. A única exceção são as esperas do deploy (marcadas como ⏳), em que se narra o que o script está fazendo sem ação nova. Leia a fala enquanto executa a ação da mesma linha.
 
-### Parte 1 — Apresentação e explicação do `azure-deploy.sh` (≈ 3 min, aproximado)
+### Parte 1 — Apresentação do projeto e da estrutura do deploy (≈ 2 min, aproximado)
 
 | # | Ação na tela | Fala sugerida |
 |---|---|---|
 | 1.1 | Mostrar o `README.md` no VS Code e a árvore `src/`, `scripts/`, `docs/` (sem abrir o `.env`). | “Este é o DimDim, aplicação Web em Java 21 / Spring Boot para gerenciar usuários e fazendas. Vai rodar no Azure App Service, com Azure SQL como banco PaaS e Application Insights para telemetria.” |
-| 1.2 | Abrir `scripts/azure-deploy.sh` no topo (carga do `.env` e validações iniciais). | “Todo o deploy é feito por um único script, `azure-deploy.sh`. Ele carrega as variáveis do `.env` (que não vou mostrar), valida o IP e confere se estou logado no Azure CLI.” |
-| 1.3 | Rolar até `az group create` e `az sql server create` / `az sql db create`. | “Primeiro ele cria o Resource Group, registra os providers, cria o SQL Server e o banco Basic, e libera o firewall para o Azure e para o meu IP, temporariamente.” |
-| 1.4 | Rolar até `az appservice plan create` e `az webapp create`. | “Depois cria o App Service Plan Linux B1 e o Web App com Java 21, somente HTTPS.” |
-| 1.5 | Rolar até `azure-sql-init.sh` e `az monitor app-insights component create`. | “Em seguida executa o DDL das duas tabelas e cria um usuário restrito para a aplicação, sem privilégio de administrador. Também cria o Application Insights.” |
-| 1.6 | Rolar até `appsettings set` e `mvnw clean test package`. | “As configurações vão como app settings, sem segredos no código. Então o script roda os testes e gera o JAR.” |
-| 1.7 | Rolar até `az webapp deploy` e a validação. | “O pacote, com o agente do Application Insights, é enviado com `az webapp deploy`, e o script valida em duas fases: `/` para o container e `/actuator/health`, que também valida a conexão com o banco.” |
+| 1.2 | Expandir a pasta `scripts/` mostrando os arquivos `01-` a `10-` e `99-teardown.sh`. | “O deploy foi dividido em dez etapas numeradas, cada uma com uma única responsabilidade. Vou executar uma por uma, explicando o que cada uma faz.” |
+| 1.3 | Abrir `scripts/common.sh` no bloco de variáveis (`LOCATION`, nomes dos recursos). | “Todas as etapas compartilham este arquivo: ele carrega o `.env`, que não vou mostrar, e define os nomes dos recursos e a região `southcentralus`.” |
 
-### Parte 2 — Execução do deploy (≈ 8–10 min, aproximado)
+### Parte 2 — Deploy etapa por etapa (≈ 10–12 min, aproximado)
 
-Abrir o terminal na raiz do projeto, com `export PATH="$PATH:/opt/mssql-tools18/bin"`. **Não interrompa (Ctrl+C) em nenhum momento.** Esperas de alguns minutos com timeouts de `curl` são normais. Se algo falhar depois que a infraestrutura existe, não apague nem recrie: corrija e use `--app-only`.
+Abrir o terminal na raiz do projeto, com `export PATH="$PATH:/opt/mssql-tools18/bin"`. Em cada etapa: **abra o script no VS Code, explique, execute no terminal e comente o resultado**. Cada etapa termina com `==> Etapa NN concluída em ...` e o caminho do log em `logs/`. **Não interrompa (Ctrl+C) uma etapa em andamento.** Se uma etapa falhar, não apague nem recrie recursos: corrija e rode novamente a mesma etapa (todas reutilizam o que já existe).
 
 | # | Ação na tela | Fala sugerida |
 |---|---|---|
-| 2.0 | Executar `bash scripts/azure-deploy.sh --preflight-only`. | “Antes de criar qualquer coisa, o preflight verifica, somente em leitura, login, ferramentas e região.” |
-| 2.1 | Executar `bash scripts/azure-deploy.sh`. | “Vou executar o script completo. Ele grava um log em `logs/`.” |
-| 2.2 | ⏳ Aparece “Criando ou atualizando recursos…”. | “Está criando o Resource Group, registrando providers e criando o SQL Server e o banco.” |
-| 2.3 | ⏳ Aparece a regra `AllowTemporaryClientIP`. (Oculte o IP na edição.) | “O firewall foi aberto temporariamente para o meu IP, para o script poder aplicar o schema.” |
-| 2.4 | ⏳ Aparecem “Creating App Service Plan” e a criação do Web App. | “Agora o plano Linux e o Web App com Java 21.” |
-| 2.5 | ⏳ “Inicializando o schema…”, “Aplicando DDL…”, “Azure SQL inicializado”. | “O DDL com `TB_USUARIO` e `TB_FAZENDA` foi aplicado e o usuário restrito da aplicação foi criado.” |
-| 2.6 | ⏳ Saída do Maven com testes e `BUILD SUCCESS`. | “Os testes passaram e o JAR foi empacotado.” |
-| 2.7 | ⏳ “Enviando o pacote…”, “Warming up Kudu…”. | “O pacote está sendo enviado ao App Service.” |
-| 2.8 | ⏳ “Aguardando o App Service responder…” com timeouts de `curl`. | “O primeiro start do Java no plano B1 com o agente de telemetria leva alguns minutos; os timeouts são esperados, o script segue tentando.” |
-| 2.9 | Aparece a validação em duas fases (`/` e `/actuator/health`) e a conclusão do deploy. | “Primeiro o container respondeu em `/`; depois o health check respondeu `UP`, incluindo o banco. Deploy concluído.” |
-| 2.9a | Listar `logs/` e mostrar o arquivo `deploy-<modo>-<timestamp>.log` (sem segredos). | “O script guarda o log completo da execução na pasta `logs/`.” |
-| 2.10 | Abrir o portal Azure no Resource Group `561413-dimdim-rg`, mostrando plano, Web App, SQL Server/database e Application Insights. | “Estes são os recursos criados pelo script, na região configurada.” |
+| 2.1 | Abrir `01-preflight.sh`; executar `bash scripts/01-preflight.sh`. (Oculte subscription e IP na edição.) | “A etapa 1 é só leitura: confere as variáveis do `.env` sem exibir valores, as ferramentas, o login no Azure CLI, meu IP público e se a região `southcentralus` oferece App Service B1 Linux e SQL Basic. Nada é criado.” |
+| 2.2 | Abrir `02-resource-group.sh`; executar `bash scripts/02-resource-group.sh`. | “A etapa 2 registra os resource providers usados e cria o Resource Group. A tabela no final mostra o grupo criado na região.” |
+| 2.3 | Abrir `03-sql-database.sh`; executar `bash scripts/03-sql-database.sh`. ⏳ Narrar durante a criação. (Oculte o IP na edição.) | “A etapa 3 cria o Azure SQL, que é PaaS: o SQL Server lógico, duas regras de firewall — `AllowAzureServices`, que libera somente serviços do Azure, e o IP exato desta máquina — e o banco na edição Basic. A criação leva alguns minutos.” |
+| 2.4 | Abrir `scripts/azure-sql.sql` e `04-sql-schema.sh`; executar `bash scripts/04-sql-schema.sh`. | “A etapa 4 aplica o DDL das tabelas `TB_USUARIO` e `TB_FAZENDA`, ligadas por chave estrangeira, e cria um usuário restrito para a aplicação, só com leitura e escrita — sem privilégio de administrador.” |
+| 2.5 | Abrir `05-app-service.sh`; executar `bash scripts/05-app-service.sh`. | “A etapa 5 cria o App Service Plan Linux B1, em uma única tentativa, e o Web App com runtime Java 21, somente HTTPS.” |
+| 2.6 | Abrir `06-app-insights.sh`; executar `bash scripts/06-app-insights.sh`. | “A etapa 6 cria o Application Insights, que vai receber a telemetria da aplicação.” |
+| 2.7 | Abrir `07-build.sh`; executar `bash scripts/07-build.sh`. ⏳ Narrar durante o Maven. | “A etapa 7 é local: roda os testes, gera o JAR com Maven e monta o pacote zip com o JAR e o agente Java do Application Insights.” Ao final: “Os testes passaram e o pacote foi gerado.” |
+| 2.8 | Abrir `08-configure-webapp.sh`; executar `bash scripts/08-configure-webapp.sh`. | “A etapa 8 configura o Web App: a conexão com o banco, o segredo do JWT e a connection string do Application Insights vão como App Settings — nenhum segredo fica no código. Ela também ativa o Always On e define o comando de inicialização com o agente de telemetria na porta 8080. Repare que só os nomes das configurações são exibidos.” |
+| 2.9 | Abrir `09-deploy.sh`; executar `bash scripts/09-deploy.sh`. ⏳ Narrar durante o envio. | “A etapa 9 publica o pacote no App Service com `az webapp deploy`.” |
+| 2.10 | Abrir `10-validate.sh`; executar `bash scripts/10-validate.sh`. ⏳ Narrar durante as tentativas. | “A etapa 10 valida em duas fases: primeiro `/`, que mostra que o container subiu; depois `/actuator/health`, que só responde `UP` se a conexão com o Azure SQL funcionar. O primeiro start da JVM no B1 leva alguns minutos, então as primeiras tentativas sem resposta são esperadas.” |
+| 2.11 | Listar `logs/` e abrir um dos arquivos (sem segredos). | “Cada etapa gravou seu próprio log na pasta `logs/`.” |
+| 2.12 | Abrir o portal Azure no Resource Group `561413-dimdim-rg`, mostrando plano, Web App, SQL Server/database e Application Insights. | “Estes são os recursos criados pelas etapas, na região South Central US.” |
+
+> Atalho fora da gravação: `bash scripts/azure-deploy.sh` executa as etapas 01 a 10 em sequência; `bash scripts/azure-deploy.sh 07` refaz somente build, configuração, deploy e validação.
 
 ### Parte 3 — Front-end, cadastro e CRUD com `sqlcmd` (≈ 8–10 min, aproximado)
 
@@ -191,7 +189,7 @@ A ingestão pode levar alguns minutos. Se ainda não houver dados, gere acessos 
 ## Checklist antes de encerrar
 
 - [ ] O vídeo tem pelo menos 720p e explicação falada.
-- [ ] A gravação mostra a execução do How To e o `--preflight-only`, o comando real `bash scripts/azure-deploy.sh` e o log gerado em `logs/`.
+- [ ] A gravação mostra a execução do How To e a execução real das etapas `01-preflight.sh` a `10-validate.sh`, uma a uma, e os logs gerados em `logs/`.
 - [ ] É possível ver a criação ou reutilização dos recursos, os testes/build e o envio por `az webapp deploy`, além do validação final em duas fases.
 - [ ] A interface Web hospedada no Azure está funcionando; não é uma demonstração somente em localhost ou somente de API.
 - [ ] CREATE, READ, UPDATE e DELETE foram mostrados para **cada** tabela, com consulta ao Azure SQL após cada operação.
@@ -209,7 +207,7 @@ A ingestão pode levar alguns minutos. Se ainda não houver dados, gere acessos 
 
    ```bash
    cd /mnt/c/Users/LGA/Documents/checkpoint5-devops/cp4-devops
-   bash scripts/azure-teardown.sh
+   bash scripts/99-teardown.sh
    ```
 
    Confirme no prompt o nome exato do Resource Group. O teardown remove os recursos e os dados Azure; não o execute antes de concluir a gravação e guardar as evidências.

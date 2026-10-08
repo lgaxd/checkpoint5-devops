@@ -1,32 +1,24 @@
 #!/usr/bin/env bash
-# Valida a aplicação em duas etapas, sempre por código HTTP (sem --fail, para
-# que o corpo da resposta apareça quando algo falha):
-#   Fase 1: GET /                 -> 200 (o container subiu)
-#   Fase 2: GET /actuator/health  -> 200 e "status":"UP" (o banco responde)
+# Etapa 10 — Validação da aplicação publicada, em duas fases, sempre por código HTTP:
+#   Fase 1: GET /                 -> 200 (o container subiu e responde na porta 8080)
+#   Fase 2: GET /actuator/health  -> 200 e "status":"UP" (a conexão com o Azure SQL funciona)
 #
-# Uso standalone: BASE_URL=https://meu-app.azurewebsites.net bash scripts/validate.sh
-# Variáveis:
-#   BASE_URL       padrão http://localhost:8080
-#   WAIT_TIMEOUT   segundos de espera total (as duas fases juntas); 0 = tentativa única
+# Variáveis opcionais:
+#   BASE_URL       padrão https://<WEB_APP_NAME>.azurewebsites.net
+#   WAIT_TIMEOUT   segundos de espera total (as duas fases juntas; padrão 600; 0 = tentativa única)
 #   WAIT_INTERVAL  segundos entre tentativas (padrão 10)
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+step_begin "Validação da aplicação (/ e /actuator/health)"
+require_tools curl
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib-common.sh
-source "$SCRIPT_DIR/lib-common.sh"
-
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+BASE_URL="${BASE_URL:-$APP_URL}"
 BASE_URL="${BASE_URL%/}"
-WAIT_TIMEOUT="${WAIT_TIMEOUT:-0}"
+WAIT_TIMEOUT="${WAIT_TIMEOUT:-600}"
 WAIT_INTERVAL="${WAIT_INTERVAL:-10}"
 
-if ! command -v curl >/dev/null 2>&1; then
-  echo "curl é necessário para validar a aplicação." >&2
-  exit 1
-fi
-
 BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/dimdim-validate.XXXXXX")"
-trap 'rm -f "$BODY_FILE"' EXIT
+trap 'rc=$?; rm -f "$BODY_FILE"; step_finish "$rc"' EXIT
 START=$SECONDS
 DEADLINE=$((START + WAIT_TIMEOUT))
 HTTP_CODE="000"
@@ -41,6 +33,8 @@ show_failure() {
   echo "    Corpo da resposta (até 1000 bytes):" >&2
   head -c 1000 "$BODY_FILE" | mask_ips | sed 's/^/      /' >&2
   echo >&2
+  # Só coleta logs do App Service quando a URL validada é a do Web App configurado.
+  [[ "$BASE_URL" != "$APP_URL" ]] || diagnose_app
 }
 
 # wait_phase <rótulo> <caminho> <modo: status|health>
@@ -65,8 +59,11 @@ wait_phase() {
   done
 }
 
+echo "O primeiro start da JVM no plano B1 leva alguns minutos; tentativas sem resposta são esperadas."
 wait_phase "Fase 1/2 (container no ar)" "/" status
 echo "    OK: a aplicação responde em /."
 wait_phase "Fase 2/2 (banco de dados)" "/actuator/health" health
 echo "    OK: health UP (inclui a conexão com o Azure SQL)."
-echo "Validação concluída: $BASE_URL"
+echo
+echo "Aplicação validada: $BASE_URL"
+echo "Swagger UI:         $BASE_URL/swagger"
