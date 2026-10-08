@@ -29,7 +29,7 @@ Veja o desenho macro em [`docs/architecture.md`](docs/architecture.md).
 src/main/java/br/com/fiap/dimdim/  controllers, services, entities, DTOs e repositories
 src/main/resources/static/         interface web
 src/test/                           testes de integração HTTP usando H2 somente em testes
-scripts/                            DDL, inicialização SQL, deploy, teardown e validação
+scripts/                            DDL e etapas do deploy (01 a 10), teardown (99) e orquestrador
 docs/api/                           exemplos JSON das operações REST
 docs/architecture.md                desenho da arquitetura
 docs/entrega.md                      dados de apoio para o PDF
@@ -81,7 +81,7 @@ Variáveis de região e rede:
 
 | Variável | Obrigatória | Padrão | Descrição |
 |---|---|---|---|
-| `LOCATION` | não | `eastus2` | Região do Resource Group, App Service Plan, Web App e Application Insights. |
+| `LOCATION` | não | `southcentralus` | Região do Resource Group, App Service Plan, Web App e Application Insights. |
 | `SQL_LOCATION` | não | valor de `LOCATION` | Região do Azure SQL Server. Use outra região apenas se a primeira não tiver capacidade para SQL. |
 | `CLIENT_IP` | não | detectado automaticamente | IPv4 público do host que executa o deploy; pode ser informado manualmente se a detecção falhar. |
 
@@ -100,11 +100,11 @@ az sql server firewall-rule delete \
 
 O DDL idempotente está em [`scripts/azure-sql.sql`](scripts/azure-sql.sql): cria `TB_USUARIO`, `TB_FAZENDA`, PKs, FK com `ON DELETE CASCADE`, restrição positiva para a área e índice da FK.
 
-O script `azure-sql-init.sh` aplica o DDL e cria/atualiza o usuário contido da aplicação, dando apenas `db_datareader` e `db_datawriter`. Requer `sqlcmd` e conectividade permitida pelo firewall. As contas de demonstração são criadas pelo endpoint de registro para que a senha seja armazenada com hash BCrypt.
+A etapa [`04-sql-schema.sh`](scripts/04-sql-schema.sh) aplica o DDL e cria/atualiza o usuário contido da aplicação, dando apenas `db_datareader` e `db_datawriter`. Requer `sqlcmd` e conectividade permitida pelo firewall. As contas de demonstração são criadas pelo endpoint de registro para que a senha seja armazenada com hash BCrypt.
 
 ## Criação da infraestrutura e deploy
 
-> **⚠️ AVISO — não crie App Service Plan em loop nem rode teardown entre tentativas.** Criar e apagar planos repetidamente na mesma região pode fazer a Azure bloquear a capacidade daquela região por tempo prolongado. Se algo falhar depois que a infraestrutura existe, **corrija e use `--app-only`** (build + deploy + validação, sem recriar nada). Use `--preflight-only` antes de qualquer criação e só rode o teardown ao final do trabalho.
+> **⚠️ AVISO — não crie App Service Plan em loop nem rode teardown entre tentativas.** Criar e apagar planos repetidamente na mesma região pode fazer a Azure bloquear a capacidade daquela região por tempo prolongado. Todas as etapas são idempotentes (reutilizam o que já existe): se algo falhar, **corrija e rode novamente somente a etapa que falhou** e as seguintes. Rode o preflight (etapa 01) antes de qualquer criação e só rode o teardown ao final do trabalho.
 
 1. Copie e preencha `.env`.
 2. Faça login e confirme a subscription:
@@ -117,49 +117,54 @@ O script `azure-sql-init.sh` aplica o DDL e cria/atualiza o usuário contido da 
    az account show --output table
    ```
 
-3. Gere e preencha `JWT_SECRET` (`openssl rand -base64 32`). `LOCATION` (padrão `eastus2`), `SQL_LOCATION` e `CLIENT_IP` são opcionais.
-4. **Rode primeiro o preflight** (somente leitura, não cria nada):
+3. Gere e preencha `JWT_SECRET` (`openssl rand -base64 32`). `LOCATION` (padrão `southcentralus`), `SQL_LOCATION` e `CLIENT_IP` são opcionais.
+4. Execute as etapas, uma a uma, na ordem abaixo.
 
-   ```bash
-   bash scripts/azure-deploy.sh --preflight-only
-   ```
+### Etapas do deploy
 
-5. Execute o fluxo completo:
+O deploy é dividido em scripts numerados em [`scripts/`](scripts/), cada um com uma única responsabilidade. Todos compartilham a configuração de [`common.sh`](scripts/common.sh) (carga do `.env`, nomes dos recursos e região).
 
-   ```bash
-   bash scripts/azure-deploy.sh
-   ```
+| Etapa | Comando | Responsabilidade |
+|---|---|---|
+| 01 | `bash scripts/01-preflight.sh` | Somente leitura: variáveis do `.env`, ferramentas, login, IP público e disponibilidade da região (B1 Linux e SQL Basic). Não cria nada. |
+| 02 | `bash scripts/02-resource-group.sh` | Registra os resource providers e cria o Resource Group. |
+| 03 | `bash scripts/03-sql-database.sh` | Cria o Azure SQL Server, as regras de firewall (`AllowAzureServices` e IP exato da máquina) e o database Basic. |
+| 04 | `bash scripts/04-sql-schema.sh` | Aplica o DDL (`azure-sql.sql`) e cria o usuário restrito da aplicação. |
+| 05 | `bash scripts/05-app-service.sh` | Cria o App Service Plan Linux B1 (uma única tentativa) e o Web App Java 21, somente HTTPS. |
+| 06 | `bash scripts/06-app-insights.sh` | Cria o Application Insights. |
+| 07 | `bash scripts/07-build.sh` | Roda os testes, gera o JAR (`./mvnw clean package`), baixa o agente Java do Application Insights (3.7.9) e monta o zip. |
+| 08 | `bash scripts/08-configure-webapp.sh` | Aplica os App Settings (banco, JWT, Application Insights, porta 8080, perfil `azure`), Always On e o comando de inicialização. |
+| 09 | `bash scripts/09-deploy.sh` | Publica o zip com `az webapp deploy`. |
+| 10 | `bash scripts/10-validate.sh` | Valida a aplicação em duas fases (veja [Validação](#validação)). |
+| 99 | `bash scripts/99-teardown.sh` | Remove o Resource Group (somente ao final, com confirmação). |
 
-Modos do script:
+Para executar várias etapas em sequência (parando na primeira falha), use o orquestrador [`azure-deploy.sh`](scripts/azure-deploy.sh):
 
 | Comando | O que faz |
 |---|---|
-| `bash scripts/azure-deploy.sh` | Fluxo completo: infraestrutura, banco, build, deploy e validação. |
-| `bash scripts/azure-deploy.sh --preflight-only` | Somente leitura. Rode antes de tudo. |
-| `bash scripts/azure-deploy.sh --infra-only` | Cria/reutiliza apenas a infraestrutura. |
-| `bash scripts/azure-deploy.sh --app-only` | Ciclo rápido de correções: build + deploy + validação, sem recriar a infraestrutura. |
+| `bash scripts/azure-deploy.sh` | Etapas 01 a 10 (fluxo completo). |
+| `bash scripts/azure-deploy.sh 02 06` | Somente infraestrutura e banco. |
+| `bash scripts/azure-deploy.sh 07` | Ciclo rápido de correções: build, configuração, deploy e validação, sem recriar a infraestrutura. |
 
-Cada execução grava um log em `logs/deploy-<modo>-<timestamp>.log`; confira que não contém segredos antes de compartilhá-lo.
-
-O fluxo completo cria/reutiliza Resource Group, Azure SQL Server, database, regra restrita para serviços Azure e regra do IP local, App Service Plan Linux B1, Web App Java 21 (porta 8080 explícita, Always On ativado) e Application Insights. Inicializa o DDL e o usuário de banco, executa `./mvnw clean test package`, baixa o Application Insights Java Agent oficial (versão 3.7.9), prepara o pacote, configura App Settings (incluindo o `JWT_SECRET`) e publica via `az webapp deploy`. Por fim, valida a aplicação em duas fases (veja [Validação](#validação)).
+Cada etapa grava seu log em `logs/<etapa>-<timestamp>.log` e termina com o tempo gasto e o resultado; confira que o log não contém segredos antes de compartilhá-lo.
 
 O Application Insights connection string é consultado no recurso Azure durante o deploy e armazenado apenas nos App Settings do Web App (`APPLICATIONINSIGHTS_CONNECTION_STRING`). O agente Java é iniciado com `-javaagent` e coleta telemetria de requests, dependências, logs, métricas e exceções. Nenhum connection string é salvo no repositório.
 
-Se o `WEB_APP_NAME` padrão já estiver ocupado, escolha outro valor globalmente único no `.env` e repita o deploy. `RESOURCE_GROUP` define o escopo removido pelo teardown.
+Se o `WEB_APP_NAME` padrão já estiver ocupado, escolha outro valor globalmente único no `.env` e rode novamente a partir da etapa 05. `RESOURCE_GROUP` define o escopo removido pelo teardown.
 
 ## Validação
 
-O deploy valida a aplicação em duas fases:
+A etapa 10 valida a aplicação em duas fases:
 
 1. `GET /` — confirma que o container subiu e responde na porta 8080 (não depende do banco).
 2. `GET /actuator/health` — confirma a aplicação e a conexão com o Azure SQL (o health do Spring Boot inclui o datasource).
 
-Se alguma fase falhar por tempo, o script coleta automaticamente os logs do App Service.
+Se alguma fase falhar por tempo, a etapa coleta automaticamente os logs do App Service.
 
-O script [validate.sh](scripts/validate.sh) também pode ser executado isoladamente. As APIs CRUD exigem JWT e não são chamadas sem autenticação pelo script:
+Por padrão a etapa valida `https://<WEB_APP_NAME>.azurewebsites.net`; para outra URL, defina `BASE_URL`. As APIs CRUD exigem JWT e não são chamadas sem autenticação pelo script:
 
 ```bash
-BASE_URL="https://SEU-WEB-APP.azurewebsites.net" bash scripts/validate.sh
+BASE_URL="https://SEU-WEB-APP.azurewebsites.net" bash scripts/10-validate.sh
 ```
 
 Interpretação rápida: `/` OK e health OK = tudo certo; `/` OK e health `DOWN` = problema de banco/credenciais; `/` sem resposta = problema no container ou na porta.
@@ -255,7 +260,7 @@ Após o deploy, abra o recurso Application Insights configurado em `APP_INSIGHTS
 Grave em 720p ou superior, com explicação falada:
 
 1. Provisionamento (ou recursos já criados), App Service, Azure SQL e Application Insights.
-2. Preflight (`--preflight-only`), build/testes e deploy executados por `scripts/azure-deploy.sh` com `az webapp deploy`, mostrando o log gerado em `logs/`.
+2. Execução das etapas `scripts/01-preflight.sh` a `scripts/10-validate.sh`, uma a uma, incluindo build/testes e o deploy com `az webapp deploy`, mostrando os logs gerados em `logs/`.
 3. Interface Web ou Swagger, incluindo CREATE, READ, UPDATE e DELETE de Usuário e Fazenda.
 4. Consultas no Azure SQL após operações para demonstrar persistência e FK.
 5. Requests/telemetria visíveis no Application Insights.
@@ -264,12 +269,12 @@ O roteiro detalhado do vídeo, com fala sugerida, comandos e minutagem, está em
 
 ## Troubleshooting
 
-- **Região sem capacidade para SQL ou B1**: erros como `RegionDoesNotAllowProvisioning` ou "not available in this region". Rode `--preflight-only`, defina `SQL_LOCATION` com outra região (o SQL pode ficar em região diferente do App Service) ou altere `LOCATION`. Não crie e apague planos repetidamente (veja o aviso acima).
+- **Região sem capacidade para SQL ou B1**: erros como `RegionDoesNotAllowProvisioning` ou "not available in this region". Rode a etapa 01 (preflight), defina `SQL_LOCATION` com outra região (o SQL pode ficar em região diferente do App Service) ou altere `LOCATION`. Não crie e apague planos repetidamente (veja o aviso acima).
 - **Firewall demorando a propagar**: a regra do `CLIENT_IP` pode levar alguns minutos para valer. Se o `sqlcmd` falhar logo após criar a regra, aguarde e repita; não amplie a faixa de IPs.
-- **Container não responde na porta**: `/` não responde dentro do tempo. Confirme que a porta 8080 está configurada no App Service e que `PORT`/`WEBSITES_PORT` não apontam para outra porta; leia os logs coletados pelo script (e o `logs/deploy-*.log`) procurando, por exemplo, `JWT_SECRET` inválido/curto, que impede a aplicação de subir. Corrija e use `--app-only`.
-- **Health `DOWN` com `/` OK**: a aplicação subiu, mas o banco não responde. Verifique `DATABASE_URL`, `DATABASE_USERNAME` e `DATABASE_PASSWORD` nos App Settings, a regra `AllowAzureServices` e se o usuário contido foi criado por `azure-sql-init.sh`. Corrija e use `--app-only`.
+- **Container não responde na porta**: `/` não responde dentro do tempo. Confirme que a porta 8080 está configurada no App Service e que `PORT`/`WEBSITES_PORT` não apontam para outra porta; leia os logs coletados pela etapa 10 (e os `logs/*.log`) procurando, por exemplo, `JWT_SECRET` inválido/curto, que impede a aplicação de subir. Corrija e rode `bash scripts/azure-deploy.sh 07`.
+- **Health `DOWN` com `/` OK**: a aplicação subiu, mas o banco não responde. Verifique `DATABASE_URL`, `DATABASE_USERNAME` e `DATABASE_PASSWORD` nos App Settings, a regra `AllowAzureServices` e se o usuário contido foi criado pela etapa 04. Corrija e rode `bash scripts/azure-deploy.sh 08`.
 - **Erro de firewall/timeout SQL**: confirme `CLIENT_IP`, a regra temporária e se `AllowAzureServices` existe. Não abra uma faixa ampla.
-- **Login SQL falha**: confira `SQL_ADMIN_USERNAME`, `SQL_ADMIN_PASSWORD`, `DATABASE_USERNAME` e `DATABASE_PASSWORD`; confirme que `DATABASE_USERNAME` difere do administrador e rode novamente `bash scripts/azure-sql-init.sh`.
+- **Login SQL falha**: confira `SQL_ADMIN_USERNAME`, `SQL_ADMIN_PASSWORD`, `DATABASE_USERNAME` e `DATABASE_PASSWORD`; confirme que `DATABASE_USERNAME` difere do administrador e rode novamente `bash scripts/04-sql-schema.sh`.
 - **JWT inválido/401**: confirme o token Bearer e `JWT_SECRET`; o valor da chave não pode mudar entre a emissão e validação do token.
 - **Nome de Web App ocupado**: altere `WEB_APP_NAME` para um nome globalmente único.
 - **Erro real aparecendo como 401**: a rota `/error` e `/actuator/health/**` são públicas, então falhas de endpoints públicos aparecem com o status real em vez de 401.
@@ -282,7 +287,7 @@ O roteiro detalhado do vídeo, com fala sugerida, comandos e minutagem, está em
 O teardown pede o nome completo do Resource Group; nenhuma exclusão ocorre sem confirmação exata:
 
 ```bash
-bash scripts/azure-teardown.sh
+bash scripts/99-teardown.sh
 ```
 
 Não rode o teardown entre tentativas de deploy (veja o aviso em [Criação da infraestrutura e deploy](#criação-da-infraestrutura-e-deploy)); use-o somente depois de salvar as evidências. Confirme que o Resource Group configurado é exclusivo do projeto. O comando exclui o grupo e todos os seus recursos/dados de forma assíncrona.
