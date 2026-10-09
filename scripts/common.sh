@@ -27,7 +27,8 @@ APP_INSIGHTS_NAME="${APP_INSIGHTS_NAME:-${RM}-dimdim-insights}"
 SQLCMD="${SQLCMD:-sqlcmd}"
 
 AGENT_VERSION="3.7.9"
-APP_PORT=8080
+# O App Service Linux (imagem Java SE embutida) sonda a porta 80; WEBSITES_PORT é ignorado.
+APP_PORT=80
 APP_URL="https://${WEB_APP_NAME}.azurewebsites.net"
 ZIP_FILE="$PROJECT_ROOT/target/dimdim-appservice.zip"
 DATABASE_URL="jdbc:sqlserver://${SQL_SERVER_NAME}.database.windows.net:1433;database=${SQL_DATABASE_NAME};encrypt=true;trustServerCertificate=false;hostNameInCertificate=*.database.windows.net;loginTimeout=30"
@@ -156,7 +157,7 @@ diagnose_app() {
   cat >&2 <<'CAUSES'
 
 Causas prováveis:
-  - Porta: o app precisa escutar em 8080 (WEBSITES_PORT=8080 e -Dserver.port=8080).
+  - Porta: o app precisa escutar em 80 (-Dserver.port=80), a porta que o App Service sonda.
   - Banco: firewall do SQL, banco Offline, DATABASE_URL incorreta.
   - Credenciais: DATABASE_USERNAME/DATABASE_PASSWORD do usuário contido, ou JWT_SECRET ausente/curto.
   - Memória/JVM: a primeira inicialização no B1 é lenta; veja o log acima.

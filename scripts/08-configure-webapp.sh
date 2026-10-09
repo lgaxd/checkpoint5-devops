@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Etapa 08 — Configura o Web App: App Settings (conexão com o banco, JWT, Application
-# Insights, porta 8080, perfil azure), Always On e comando de inicialização da JVM com o agente.
+# Insights, porta 80, perfil azure), Always On e comando de inicialização da JVM com o agente.
 # Os segredos ficam somente nos App Settings do Azure, nunca no código.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"

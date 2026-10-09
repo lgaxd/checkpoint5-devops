@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Etapa 10 — Validação da aplicação publicada, em duas fases, sempre por código HTTP:
-#   Fase 1: GET /                 -> 200 (o container subiu e responde na porta 8080)
+#   Fase 1: GET /                 -> 200 (o container subiu e responde na porta 80)
 #   Fase 2: GET /actuator/health  -> 200 e "status":"UP" (a conexão com o Azure SQL funciona)
 #
 # Variáveis opcionais:

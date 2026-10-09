@@ -85,7 +85,7 @@ Variáveis de região e rede:
 | `SQL_LOCATION` | não | valor de `LOCATION` | Região do Azure SQL Server. Use outra região apenas se a primeira não tiver capacidade para SQL. |
 | `CLIENT_IP` | não | detectado automaticamente | IPv4 público do host que executa o deploy; pode ser informado manualmente se a detecção falhar. |
 
-Em produção a aplicação roda com `SPRING_PROFILES_ACTIVE=azure`, que carrega [`application-azure.properties`](src/main/resources/application-azure.properties): o pool Hikari não derruba a subida se o banco estiver indisponível (`initialization-fail-timeout=-1`), o Hibernate não consulta metadados JDBC na inicialização e os probes de health do Actuator ficam habilitados. Essas propriedades existem somente nesse perfil; os testes (perfil `test`, H2) não são afetados. O App Service usa a porta 8080 (explícita) e Always On fica ativado. `AZURE_SUBSCRIPTION_ID` é opcional se a subscription correta já estiver ativa.
+Em produção a aplicação roda com `SPRING_PROFILES_ACTIVE=azure`, que carrega [`application-azure.properties`](src/main/resources/application-azure.properties): o pool Hikari não derruba a subida se o banco estiver indisponível (`initialization-fail-timeout=-1`), o Hibernate não consulta metadados JDBC na inicialização e os probes de health do Actuator ficam habilitados. Essas propriedades existem somente nesse perfil; os testes (perfil `test`, H2) não são afetados. No App Service a aplicação escuta na porta 80 (`-Dserver.port=80`), que é a porta sondada pela imagem Java embutida (ela ignora `WEBSITES_PORT`); localmente o padrão continua 8080. Always On fica ativado. `AZURE_SUBSCRIPTION_ID` é opcional se a subscription correta já estiver ativa.
 
 `CLIENT_IP` é o IPv4 público exato do host que executa o deploy e `sqlcmd`; é detectado automaticamente e só precisa ser definido se a detecção falhar. O fluxo automatizado o utiliza para inicializar Azure SQL. Isso cria somente uma regra individual chamada `AllowTemporaryClientIP`. O valor especial `0.0.0.0` a `0.0.0.0` da regra `AllowAzureServices` permite conexões originadas em serviços hospedados no Azure e não é uma liberação universal. Remova a regra temporária após o trabalho:
 
@@ -133,7 +133,7 @@ O deploy é dividido em scripts numerados em [`scripts/`](scripts/), cada um com
 | 05 | `bash scripts/05-app-service.sh` | Cria o App Service Plan Linux B1 (uma única tentativa) e o Web App Java 21, somente HTTPS. |
 | 06 | `bash scripts/06-app-insights.sh` | Cria o Application Insights. |
 | 07 | `bash scripts/07-build.sh` | Roda os testes, gera o JAR (`./mvnw clean package`), baixa o agente Java do Application Insights (3.7.9) e monta o zip. |
-| 08 | `bash scripts/08-configure-webapp.sh` | Aplica os App Settings (banco, JWT, Application Insights, porta 8080, perfil `azure`), Always On e o comando de inicialização. |
+| 08 | `bash scripts/08-configure-webapp.sh` | Aplica os App Settings (banco, JWT, Application Insights, porta 80, perfil `azure`), Always On e o comando de inicialização. |
 | 09 | `bash scripts/09-deploy.sh` | Publica o zip com `az webapp deploy`. |
 | 10 | `bash scripts/10-validate.sh` | Valida a aplicação em duas fases (veja [Validação](#validação)). |
 | 99 | `bash scripts/99-teardown.sh` | Remove o Resource Group (somente ao final, com confirmação). |
@@ -156,7 +156,7 @@ Se o `WEB_APP_NAME` padrão já estiver ocupado, escolha outro valor globalmente
 
 A etapa 10 valida a aplicação em duas fases:
 
-1. `GET /` — confirma que o container subiu e responde na porta 8080 (não depende do banco).
+1. `GET /` — confirma que o container subiu e responde na porta 80 (não depende do banco).
 2. `GET /actuator/health` — confirma a aplicação e a conexão com o Azure SQL (o health do Spring Boot inclui o datasource).
 
 Se alguma fase falhar por tempo, a etapa coleta automaticamente os logs do App Service.
@@ -271,7 +271,7 @@ O roteiro detalhado do vídeo, com fala sugerida, comandos e minutagem, está em
 
 - **Região sem capacidade para SQL ou B1**: erros como `RegionDoesNotAllowProvisioning` ou "not available in this region". Rode a etapa 01 (preflight), defina `SQL_LOCATION` com outra região (o SQL pode ficar em região diferente do App Service) ou altere `LOCATION`. Não crie e apague planos repetidamente (veja o aviso acima).
 - **Firewall demorando a propagar**: a regra do `CLIENT_IP` pode levar alguns minutos para valer. Se o `sqlcmd` falhar logo após criar a regra, aguarde e repita; não amplie a faixa de IPs.
-- **Container não responde na porta**: `/` não responde dentro do tempo. Confirme que a porta 8080 está configurada no App Service e que `PORT`/`WEBSITES_PORT` não apontam para outra porta; leia os logs coletados pela etapa 10 (e os `logs/*.log`) procurando, por exemplo, `JWT_SECRET` inválido/curto, que impede a aplicação de subir. Corrija e rode `bash scripts/azure-deploy.sh 07`.
+- **Container não responde na porta**: `/` não responde dentro do tempo. Confirme que o comando de inicialização usa `-Dserver.port=80`: a imagem Java do App Service sonda a porta 80 e ignora `WEBSITES_PORT` (o log `*_docker.log` mostra `Port mismatch detected` quando há divergência); leia os logs coletados pela etapa 10 (e os `logs/*.log`) procurando, por exemplo, `JWT_SECRET` inválido/curto, que impede a aplicação de subir. Corrija e rode `bash scripts/azure-deploy.sh 07`.
 - **Health `DOWN` com `/` OK**: a aplicação subiu, mas o banco não responde. Verifique `DATABASE_URL`, `DATABASE_USERNAME` e `DATABASE_PASSWORD` nos App Settings, a regra `AllowAzureServices` e se o usuário contido foi criado pela etapa 04. Corrija e rode `bash scripts/azure-deploy.sh 08`.
 - **Erro de firewall/timeout SQL**: confirme `CLIENT_IP`, a regra temporária e se `AllowAzureServices` existe. Não abra uma faixa ampla.
 - **Login SQL falha**: confira `SQL_ADMIN_USERNAME`, `SQL_ADMIN_PASSWORD`, `DATABASE_USERNAME` e `DATABASE_PASSWORD`; confirme que `DATABASE_USERNAME` difere do administrador e rode novamente `bash scripts/04-sql-schema.sh`.
