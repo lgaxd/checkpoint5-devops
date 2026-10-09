@@ -2,6 +2,10 @@
 
 Aplicação Web e API REST Java para gerenciar usuários e suas fazendas, preparada para o checkpoint de Cloud Computing da FIAP. A solução usa Java 21, Spring Boot, Azure App Service Linux, Azure SQL Database PaaS e Azure Application Insights. O deploy é executado pela Azure CLI com `az webapp deploy`; não utiliza Docker, ACI, ACR ou GitHub Actions.
 
+> 🎥 **Vídeo de demonstração:** [https://www.youtube.com/watch?v=NGtYeb7sk0Y](https://www.youtube.com/watch?v=NGtYeb7sk0Y)
+>
+> ⚠️ **A aplicação não está mais no ar.** Depois de gravar a demonstração, todos os recursos foram removidos com `scripts/99-teardown.sh` para não consumir os créditos do Azure com uptime. As URLs `https://561413-dimdim-webapp.azurewebsites.net` deixaram de responder; o comportamento completo está no vídeo acima. Para publicá-la de novo, siga [Criação da infraestrutura e deploy](#criação-da-infraestrutura-e-deploy).
+
 ## Objetivo
 
 Demonstrar uma aplicação Web publicada na Azure, com persistência relacional real, operações CRUD completas nas duas entidades e telemetria da aplicação. Um usuário pode possuir várias fazendas; a relação existe no Azure SQL por meio de uma chave estrangeira.
@@ -21,7 +25,9 @@ Demonstrar uma aplicação Web publicada na Azure, com persistência relacional 
 
 O browser acessa o frontend estático e a API REST no mesmo App Service. A API se conecta por JDBC/TLS ao Azure SQL Database. O Application Insights Java Agent instrumenta a aplicação e envia telemetria ao recurso Application Insights.
 
-Veja o desenho macro em [`docs/architecture.md`](docs/architecture.md).
+![Diagrama da arquitetura do DimDim](docs/img/diagrama-arquitetura.png)
+
+Uma versão textual do desenho (Mermaid) está em [`docs/architecture.md`](docs/architecture.md).
 
 ## Estrutura do projeto
 
@@ -31,8 +37,8 @@ src/main/resources/static/         interface web
 src/test/                           testes de integração HTTP usando H2 somente em testes
 scripts/                            DDL e etapas do deploy (01 a 10), teardown (99) e orquestrador
 docs/api/                           exemplos JSON das operações REST
-docs/architecture.md                desenho da arquitetura
-docs/entrega.md                      dados de apoio para o PDF
+docs/architecture.md                desenho da arquitetura (Mermaid)
+docs/img/                           imagem do diagrama de arquitetura
 ```
 
 ## Pré-requisitos
@@ -84,6 +90,8 @@ Variáveis de região e rede:
 | `LOCATION` | não | `southcentralus` | Região do Resource Group, App Service Plan, Web App e Application Insights. |
 | `SQL_LOCATION` | não | valor de `LOCATION` | Região do Azure SQL Server. Use outra região apenas se a primeira não tiver capacidade para SQL. |
 | `CLIENT_IP` | não | detectado automaticamente | IPv4 público do host que executa o deploy; pode ser informado manualmente se a detecção falhar. |
+
+> **Região usada neste projeto: `southafricanorth`.** O App Service Plan, o Web App, o Application Insights e o Azure SQL foram criados em `southafricanorth` (`LOCATION=southafricanorth` e `SQL_LOCATION=southafricanorth` no `.env`). O padrão `southcentralus` não funcionou na subscription Azure for Students usada: o Azure SQL está bloqueado ali para a subscription e não há quota de App Service B1 (`Current Limit (B1 VMs): 0`). Além disso, uma política da subscription (`Allowed resource deployment regions`) só permite criar recursos em `southafricanorth`, `spaincentral`, `southcentralus`, `eastus` e `chilecentral`. O Resource Group em si foi criado em `southcentralus`, o que não impede que seus recursos fiquem em outra região. Se for reproduzir o deploy, rode a etapa 01 e ajuste as variáveis conforme a sua subscription.
 
 Em produção a aplicação roda com `SPRING_PROFILES_ACTIVE=azure`, que carrega [`application-azure.properties`](src/main/resources/application-azure.properties): o pool Hikari não derruba a subida se o banco estiver indisponível (`initialization-fail-timeout=-1`), o Hibernate não consulta metadados JDBC na inicialização e os probes de health do Actuator ficam habilitados. Essas propriedades existem somente nesse perfil; os testes (perfil `test`, H2) não são afetados. No App Service a aplicação escuta na porta 80 (`-Dserver.port=80`), que é a porta sondada pela imagem Java embutida (ela ignora `WEBSITES_PORT`); localmente o padrão continua 8080. Always On fica ativado. `AZURE_SUBSCRIPTION_ID` é opcional se a subscription correta já estiver ativa.
 
@@ -164,17 +172,17 @@ Se alguma fase falhar por tempo, a etapa coleta automaticamente os logs do App S
 Por padrão a etapa valida `https://<WEB_APP_NAME>.azurewebsites.net`; para outra URL, defina `BASE_URL`. As APIs CRUD exigem JWT e não são chamadas sem autenticação pelo script:
 
 ```bash
-BASE_URL="https://SEU-WEB-APP.azurewebsites.net" bash scripts/10-validate.sh
+BASE_URL="https://561413-dimdim-webapp.azurewebsites.net" bash scripts/10-validate.sh
 ```
 
 Interpretação rápida: `/` OK e health OK = tudo certo; `/` OK e health `DOWN` = problema de banco/credenciais; `/` sem resposta = problema no container ou na porta.
 
-URLs da aplicação:
+URLs da aplicação enquanto estava publicada (**fora do ar** após o teardown; ficam disponíveis novamente se o deploy for refeito com o mesmo `WEB_APP_NAME`):
 
-- Interface Web: `https://SEU-WEB-APP.azurewebsites.net/`
-- Swagger UI: `https://SEU-WEB-APP.azurewebsites.net/swagger`
-- OpenAPI JSON: `https://SEU-WEB-APP.azurewebsites.net/api-docs`
-- Health: `https://SEU-WEB-APP.azurewebsites.net/actuator/health`
+- Interface Web: <https://561413-dimdim-webapp.azurewebsites.net/>
+- Swagger UI: <https://561413-dimdim-webapp.azurewebsites.net/swagger>
+- OpenAPI JSON: <https://561413-dimdim-webapp.azurewebsites.net/api-docs>
+- Health: <https://561413-dimdim-webapp.azurewebsites.net/actuator/health>
 
 ## Testes
 
@@ -201,12 +209,12 @@ Os exemplos de request/response estão em [`docs/api/`](docs/api/):
 - [`usuario-get.json`](docs/api/usuario-get.json), [`usuario-post.json`](docs/api/usuario-post.json), [`usuario-put.json`](docs/api/usuario-put.json), [`usuario-delete.json`](docs/api/usuario-delete.json).
 - [`fazenda-get.json`](docs/api/fazenda-get.json), [`fazenda-post.json`](docs/api/fazenda-post.json), [`fazenda-put.json`](docs/api/fazenda-put.json), [`fazenda-delete.json`](docs/api/fazenda-delete.json).
 
-### Roteiro de CRUD para a gravação
+### Exemplo de uso do CRUD (How To)
 
 Defina a URL do Web App, registre o primeiro usuário (a resposta contém o JWT e o `id`) e copie o token e ID retornados:
 
 ```bash
-export BASE_URL="https://SEU-WEB-APP.azurewebsites.net"
+export BASE_URL="https://561413-dimdim-webapp.azurewebsites.net"
 curl -i -X POST "$BASE_URL/api/auth/register" -H "Content-Type: application/json" \
   -d '{"nome":"Responsável","email":"responsavel@example.com","senha":"senha-forte-exemplo"}'
 export TOKEN="<copie-o-token-retornado>"
@@ -239,7 +247,7 @@ curl -i -X PUT "$BASE_URL/api/fazendas/$FARM_ID" -H "Authorization: Bearer $TOKE
   -d "{\"usuarioId\":$USER_ID,\"nome\":\"Fazenda Horizonte II\",\"cidade\":\"Ribeirao Preto\",\"estado\":\"SP\",\"areaHectares\":135.00}"
 ```
 
-Depois de registrar as criações e atualizações, mostre a persistência no Azure SQL e exclua primeiro a fazenda e depois o usuário:
+Depois de registrar as criações e atualizações, consulte a persistência no Azure SQL e exclua primeiro a fazenda e depois o usuário:
 
 ```bash
 sqlcmd -S "tcp:${SQL_SERVER_NAME}.database.windows.net,1433" -d "$SQL_DATABASE_NAME" \
@@ -255,21 +263,21 @@ IDs são identity e aumentam; use sempre os IDs retornados pelas respostas reais
 
 Após o deploy, abra o recurso Application Insights configurado em `APP_INSIGHTS_NAME` no portal Azure. Use **Investigate > Transaction search** ou **Logs** para demonstrar requests/dependências; acesse a página e execute chamadas CRUD antes de consultar. A ingestão pode levar alguns minutos. O script também mostra o App Service URL e registra o connection string apenas na configuração do recurso.
 
-## Evidências para o vídeo
+## Vídeo de demonstração
 
-Grave em 720p ou superior, com explicação falada:
+▶️ **[Assistir no YouTube](https://www.youtube.com/watch?v=NGtYeb7sk0Y)**
 
-1. Provisionamento (ou recursos já criados), App Service, Azure SQL e Application Insights.
-2. Execução das etapas `scripts/01-preflight.sh` a `scripts/10-validate.sh`, uma a uma, incluindo build/testes e o deploy com `az webapp deploy`, mostrando os logs gerados em `logs/`.
-3. Interface Web ou Swagger, incluindo CREATE, READ, UPDATE e DELETE de Usuário e Fazenda.
-4. Consultas no Azure SQL após operações para demonstrar persistência e FK.
-5. Requests/telemetria visíveis no Application Insights.
+O vídeo mostra:
 
-O roteiro detalhado do vídeo, com fala sugerida, comandos e minutagem, está em [`docs/roteiro-video.md`](docs/roteiro-video.md). O artefato para registrar os links está em [`docs/entrega.md`](docs/entrega.md). Os links reais do GitHub e do vídeo devem ser preenchidos antes de montar o PDF.
+1. Os recursos no Azure: App Service, Azure SQL e Application Insights.
+2. A execução das etapas `scripts/01-preflight.sh` a `scripts/10-validate.sh`, uma a uma, incluindo build/testes e o deploy com `az webapp deploy`.
+3. A interface Web ou Swagger, com CREATE, READ, UPDATE e DELETE de Usuário e Fazenda.
+4. Consultas no Azure SQL após as operações, demonstrando a persistência e a chave estrangeira.
+5. Requests e telemetria no Application Insights.
 
 ## Troubleshooting
 
-- **Região sem capacidade para SQL ou B1**: erros como `RegionDoesNotAllowProvisioning` ou "not available in this region". Rode a etapa 01 (preflight), defina `SQL_LOCATION` com outra região (o SQL pode ficar em região diferente do App Service) ou altere `LOCATION`. Não crie e apague planos repetidamente (veja o aviso acima).
+- **Região sem capacidade para SQL ou B1**: erros como `RegionDoesNotAllowProvisioning`, `RequestDisallowedByAzure`, "Subscriptions are restricted from provisioning in this region" ou "Operation cannot be completed without additional quota (Current Limit (B1 VMs): 0)". Assinaturas Azure for Students têm regiões e quotas restritas; este projeto usou `southafricanorth`. Rode a etapa 01 (preflight), defina `SQL_LOCATION` com outra região (o SQL pode ficar em região diferente do App Service) ou altere `LOCATION`. Não crie e apague planos repetidamente (veja o aviso acima).
 - **Firewall demorando a propagar**: a regra do `CLIENT_IP` pode levar alguns minutos para valer. Se o `sqlcmd` falhar logo após criar a regra, aguarde e repita; não amplie a faixa de IPs.
 - **Container não responde na porta**: `/` não responde dentro do tempo. Confirme que o comando de inicialização usa `-Dserver.port=80`: a imagem Java do App Service sonda a porta 80 e ignora `WEBSITES_PORT` (o log `*_docker.log` mostra `Port mismatch detected` quando há divergência); leia os logs coletados pela etapa 10 (e os `logs/*.log`) procurando, por exemplo, `JWT_SECRET` inválido/curto, que impede a aplicação de subir. Corrija e rode `bash scripts/azure-deploy.sh 07`.
 - **Health `DOWN` com `/` OK**: a aplicação subiu, mas o banco não responde. Verifique `DATABASE_URL`, `DATABASE_USERNAME` e `DATABASE_PASSWORD` nos App Settings, a regra `AllowAzureServices` e se o usuário contido foi criado pela etapa 04. Corrija e rode `bash scripts/azure-deploy.sh 08`.
@@ -290,6 +298,8 @@ O teardown pede o nome completo do Resource Group; nenhuma exclusão ocorre sem 
 bash scripts/99-teardown.sh
 ```
 
+**Estado atual:** o teardown já foi executado após a gravação do vídeo; o Resource Group, o Azure SQL, o App Service e o Application Insights deste projeto não existem mais.
+
 Não rode o teardown entre tentativas de deploy (veja o aviso em [Criação da infraestrutura e deploy](#criação-da-infraestrutura-e-deploy)); use-o somente depois de salvar as evidências. Confirme que o Resource Group configurado é exclusivo do projeto. O comando exclui o grupo e todos os seus recursos/dados de forma assíncrona.
 
 ## Integrantes
@@ -304,44 +314,44 @@ Não rode o teardown entre tentativas de deploy (veja o aviso em [Criação da i
 ## Checklist do Checkpoint
 
 ### Aplicação
-- [ ] Java
-- [ ] Web App
-- [ ] Não é Sprint 3
-- [ ] Deploy Azure
+- [x] Java
+- [x] Web App
+- [x] Não é Sprint 3
+- [x] Deploy Azure
 
 ### Banco
-- [ ] Azure SQL
-- [ ] PaaS
-- [ ] 2 tabelas relacionadas
-- [ ] CRUD tabela 1
-- [ ] CRUD tabela 2
+- [x] Azure SQL
+- [x] PaaS
+- [x] 2 tabelas relacionadas
+- [x] CRUD tabela 1
+- [x] CRUD tabela 2
 
 ### Azure
-- [ ] Azure CLI
-- [ ] App Service
-- [ ] Application Insights
-- [ ] az webapp deploy
+- [x] Azure CLI
+- [x] App Service
+- [x] Application Insights
+- [x] az webapp deploy
 
 ### GitHub
-- [ ] Descrição
-- [ ] Arquitetura
-- [ ] DDL
-- [ ] Scripts CLI
-- [ ] Código
-- [ ] How To
-- [ ] JSON
-- [ ] Vídeo
+- [x] Descrição
+- [x] Arquitetura
+- [x] DDL
+- [x] Scripts CLI
+- [x] Código
+- [x] How To
+- [x] JSON
+- [x] Vídeo
 
 ### Segurança
-- [ ] Sem credenciais no código
-- [ ] .env ignorado
-- [ ] Sem tokens versionados
+- [x] Sem credenciais no código
+- [x] .env ignorado
+- [x] Sem tokens versionados
 
 ### Vídeo
-- [ ] Criação dos recursos
-- [ ] Deploy
-- [ ] Testes
-- [ ] CRUD tabela 1
-- [ ] CRUD tabela 2
-- [ ] Persistência no Azure SQL
-- [ ] Application Insights
+- [x] Criação dos recursos
+- [x] Deploy
+- [x] Testes
+- [x] CRUD tabela 1
+- [x] CRUD tabela 2
+- [x] Persistência no Azure SQL
+- [x] Application Insights
